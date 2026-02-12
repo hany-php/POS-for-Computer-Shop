@@ -12,6 +12,9 @@ class Auth {
 
     // Login with PIN (for cashiers)
     public function loginWithPin($pin) {
+        // Find user by PIN
+        // In a production environment, PINs should also be hashed.
+        // For this implementation, we check for a direct match as per existing schema.
         $user = $this->db->fetchOne("SELECT * FROM users WHERE pin = ? AND is_active = 1", [$pin]);
         if ($user) {
             $this->createSession($user);

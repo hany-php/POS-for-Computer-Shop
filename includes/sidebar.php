@@ -30,7 +30,10 @@ $userRole = $_SESSION['role'] ?? 'cashier';
             <a class="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-500 rounded-lg" href="../pos.php"><span class="material-icons-outlined text-xl">point_of_sale</span>نقاط البيع</a>
             <?php if ($userRole === 'admin'): ?>
             <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'sales' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="sales.php"><span class="material-icons-outlined text-xl">receipt_long</span>المبيعات</a>
-            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'reports' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="reports.php"><span class="material-icons-outlined text-xl">analytics</span>التقارير</a>
+            <div class="space-y-1">
+                <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'reports' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="reports.php"><span class="material-icons-outlined text-xl">analytics</span>التقارير</a>
+                <a class="flex items-center gap-3 pr-10 py-1.5 text-xs <?= $currentPage === 'advanced-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-slate-600' ?> rounded-lg" href="advanced-reports.php">التقارير المتقدمة</a>
+            </div>
             <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'customers' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="customers.php"><span class="material-icons-outlined text-xl">people</span>العملاء</a>
             <?php endif; ?>
             <?php if (in_array($userRole, ['admin', 'technician'])): ?>
@@ -91,10 +94,17 @@ $userRole = $_SESSION['role'] ?? 'cashier';
             <span class="material-icons-outlined group-hover:text-primary transition-colors">receipt_long</span>
             <span class="font-medium">المبيعات</span>
         </a>
-        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'reports' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="reports.php">
-            <span class="material-icons-outlined group-hover:text-primary transition-colors">analytics</span>
-            <span class="font-medium">التقارير</span>
-        </a>
+        <div class="space-y-1">
+            <a class="flex items-center gap-3 px-4 py-3 <?= in_array($currentPage, ['reports', 'advanced-reports']) ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="reports.php">
+                <span class="material-icons-outlined group-hover:text-primary transition-colors">analytics</span>
+                <span class="font-medium">التقارير</span>
+            </a>
+            <?php if (in_array($currentPage, ['reports', 'advanced-reports'])): ?>
+            <a class="flex items-center gap-3 pr-12 py-2 text-sm <?= $currentPage === 'advanced-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-primary' ?> transition-colors" href="advanced-reports.php">
+                <span class="text-xs">← التقارير المتقدمة</span>
+            </a>
+            <?php endif; ?>
+        </div>
         <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'customers' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="customers.php">
             <span class="material-icons-outlined group-hover:text-primary transition-colors">people</span>
             <span class="font-medium">العملاء</span>

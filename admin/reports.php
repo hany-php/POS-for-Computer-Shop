@@ -82,12 +82,18 @@ include __DIR__ . '/../includes/header.php';
                     <h1 class="text-2xl font-bold text-slate-900">التقارير</h1>
                     <p class="text-sm text-slate-500 mt-1">تحليل تفصيلي للمبيعات والأرباح</p>
                 </div>
-                <form method="GET" class="flex items-center gap-3">
-                    <input type="date" name="from" value="<?= $from ?>" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary">
-                    <span class="text-slate-400">←</span>
-                    <input type="date" name="to" value="<?= $to ?>" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary">
-                    <button type="submit" class="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors">عرض</button>
-                </form>
+                <div class="flex items-center gap-3">
+                    <a href="advanced-reports.php" class="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2">
+                        <span class="material-icons-outlined text-base">analytics</span>
+                        التقارير المتقدمة
+                    </a>
+                    <form method="GET" class="flex items-center gap-3">
+                        <input type="date" name="from" value="<?= $from ?>" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary">
+                        <span class="text-slate-400">←</span>
+                        <input type="date" name="to" value="<?= $to ?>" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary">
+                        <button type="submit" class="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors">عرض</button>
+                    </form>
+                </div>
             </div>
         </header>
 

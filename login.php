@@ -5,6 +5,11 @@ $settings = getStoreSettings();
 // Handle login POST
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Verify CSRF Token
+    if (!isset($_POST['csrf_token']) || !verifyCsrfToken($_POST['csrf_token'])) {
+        die('خطأ في التحقق من صحة الطلب (CSRF)');
+    }
+
     $auth = new Auth();
     
     if (isset($_POST['login_type']) && $_POST['login_type'] === 'admin') {
@@ -136,6 +141,7 @@ if (Auth::isLoggedIn()) {
                     <?php endif; ?>
 
                     <form method="POST" id="pin-form">
+                        <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
                         <input type="hidden" name="login_type" value="pin">
                         <input type="hidden" name="pin" id="pin-input" value="">
                         
@@ -191,6 +197,7 @@ if (Auth::isLoggedIn()) {
                     <?php endif; ?>
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
                         <input type="hidden" name="login_type" value="admin">
                         <div class="space-y-4 mb-6">
                             <div>

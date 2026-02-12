@@ -24,6 +24,14 @@ $totalLast7Days = array_sum($chartData);
 // Top products
 $topProducts = $db->fetchAll("SELECT oi.product_name, SUM(oi.quantity) as total_qty, SUM(oi.total_price) as total_revenue FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id WHERE o.status='completed' AND o.created_at >= date('now','-30 days') GROUP BY oi.product_name ORDER BY total_qty DESC LIMIT 5");
 
+// Category Distribution
+$categorySales = $db->fetchAll("SELECT c.name as cat_name, SUM(oi.total_price) as total FROM order_items oi JOIN orders o ON oi.order_id = o.id JOIN products p ON oi.product_id = p.id JOIN categories c ON p.category_id = c.id WHERE o.status='completed' AND o.created_at >= date('now','-30 days') GROUP BY c.name ORDER BY total DESC");
+$catLabels = array_map(fn($d) => $d['cat_name'], $categorySales);
+$catData = array_map(fn($d) => round($d['total'], 2), $categorySales);
+
+// Maintenance Status Summary
+$maintenanceSummary = $db->fetchAll("SELECT status, COUNT(*) as count FROM maintenance_tickets GROUP BY status");
+
 include __DIR__ . '/../includes/header.php';
 ?>
 
@@ -98,12 +106,12 @@ include __DIR__ . '/../includes/header.php';
                             المبيعات (آخر 7 أيام)
                         </h3>
                     </div>
-                    <div class="relative h-[250px] flex items-center justify-center">
-                        <canvas id="salesChart"></canvas>
-                        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                            <span class="text-sm text-slate-400 font-medium">الإجمالي</span>
-                            <span class="text-2xl font-bold font-num text-slate-800"><?= number_format($totalLast7Days) ?></span>
-                            <span class="text-xs text-slate-400"><?= CURRENCY ?></span>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="relative h-[250px]">
+                            <canvas id="salesChart"></canvas>
+                        </div>
+                        <div class="relative h-[250px]">
+                            <canvas id="categoryChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -188,35 +196,45 @@ include __DIR__ . '/../includes/header.php';
 <script>
 // Sales Chart
 new Chart(document.getElementById('salesChart'), {
-    type: 'doughnut',
+    type: 'line',
     data: {
         labels: <?= json_encode($chartLabels) ?>,
         datasets: [{
-            label: 'المبيعات (<?= CURRENCY_EN ?>)',
+            label: 'المبيعات',
             data: <?= json_encode($chartData) ?>,
-            backgroundColor: [
-                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'
-            ],
-            borderColor: '#ffffff',
-            borderWidth: 2,
-            hoverOffset: 4
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: true,
+            tension: 0.4
         }]
     },
     options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-            legend: {
-                display: true,
-                position: 'right',
-                labels: {
-                    font: { family: 'Cairo' },
-                    usePointStyle: true,
-                    boxWidth: 8
-                }
-            }
-        },
-        cutout: '60%',
+            legend: { display: false },
+            title: { display: true, text: 'حجم المبيعات اليومي', font: { family: 'Cairo' } }
+        }
+    }
+});
+
+// Category Distribution Chart
+new Chart(document.getElementById('categoryChart'), {
+    type: 'doughnut',
+    data: {
+        labels: <?= json_encode($catLabels) ?>,
+        datasets: [{
+            data: <?= json_encode($catData) ?>,
+            backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { font: { family: 'Cairo', size: 10 } } },
+            title: { display: true, text: 'توزيع المبيعات حسب الفئة', font: { family: 'Cairo' } }
+        }
     }
 });
 </script>

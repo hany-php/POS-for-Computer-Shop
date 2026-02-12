@@ -90,6 +90,7 @@ include __DIR__ . '/../includes/header.php';
                     <p class="text-sm text-slate-500 mt-1">حماية بياناتك وإمكانية الاستعادة</p>
                 </div>
                 <form method="POST" class="inline">
+                    <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
                     <input type="hidden" name="action" value="backup">
                     <button type="submit" class="bg-primary hover:bg-primary-dark text-white px-5 py-2.5 rounded-xl shadow-lg shadow-primary/30 font-medium text-sm flex items-center gap-2 transition-all">
                         <span class="material-icons-outlined text-base">backup</span>
@@ -100,6 +101,26 @@ include __DIR__ . '/../includes/header.php';
         </header>
 
         <div class="p-6 space-y-6 max-w-4xl mx-auto">
+            <!-- Storage Info -->
+            <div class="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-slate-100 rounded-lg text-slate-500">
+                        <span class="material-icons-outlined">sd_storage</span>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-500">المساحة المستخدمة للنسخ</p>
+                        <?php
+                        $totalBackupSize = array_sum(array_column($backups, 'size'));
+                        ?>
+                        <p class="text-sm font-bold font-num"><?= number_format($totalBackupSize / (1024 * 1024), 2) ?> MB</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs text-slate-500">جدولة النسخ التلقائي</p>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">نشط (يومياً)</span>
+                </div>
+            </div>
+
             <!-- DB Info -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div class="bg-white rounded-xl border border-slate-200 p-5 text-center">
