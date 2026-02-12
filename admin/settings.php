@@ -6,7 +6,7 @@ $user = Auth::user();
 
 // Handle save
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $fields = ['store_name', 'store_address', 'store_phone', 'store_email', 'store_logo_url', 'tax_rate', 'currency', 'low_stock_threshold', 'receipt_footer'];
+    $fields = ['store_name', 'store_address', 'store_phone', 'store_email', 'store_logo_url', 'tax_rate', 'currency', 'low_stock_threshold', 'receipt_footer', 'print_type'];
     foreach ($fields as $key) {
         if (isset($_POST[$key])) {
             $db->query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [$key, trim($_POST[$key])]);
@@ -101,6 +101,13 @@ include __DIR__ . '/../includes/header.php';
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1.5">تذييل الفاتورة</label>
                             <textarea name="receipt_footer" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none" placeholder="مثال: شكراً لزيارتكم - نتمنى لكم يوماً سعيداً"><?= sanitize($settings['receipt_footer'] ?? 'شكراً لتعاملكم معنا') ?></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">نوع الطباعة الافتراضي</label>
+                            <select name="print_type" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all">
+                                <option value="thermal" <?= ($settings['print_type'] ?? 'thermal') === 'thermal' ? 'selected' : '' ?>>حراري (80mm)</option>
+                                <option value="a4" <?= ($settings['print_type'] ?? '') === 'a4' ? 'selected' : '' ?>>صفحة كاملة (A4)</option>
+                            </select>
                         </div>
                     </div>
                 </div>

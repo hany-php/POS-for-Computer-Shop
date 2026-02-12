@@ -516,7 +516,7 @@ document.addEventListener('keydown', (e) => {
 
 <!-- Receipt Modal (inline, same page) -->
 <div id="receipt-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-sm w-full mx-4">
+    <div id="receipt-modal-container" class="bg-white rounded-2xl shadow-2xl overflow-hidden <?= ($store['print_type'] ?? 'thermal') === 'a4' ? 'max-w-4xl' : 'max-w-sm' ?> w-full mx-4">
         <!-- Modal Controls (hidden on print) -->
         <div class="print-hide flex items-center justify-between p-4 border-b border-slate-100 bg-slate-50">
             <h3 class="font-bold text-slate-700 flex items-center gap-2">
@@ -534,7 +534,7 @@ document.addEventListener('keydown', (e) => {
             </div>
         </div>
         <!-- Receipt Body (printed) -->
-        <div id="receipt-content" class="receipt-body" dir="rtl" style="font-family:'Cairo',sans-serif;padding:16px;max-width:300px;margin:0 auto;font-size:13px;color:#222">
+        <div id="receipt-content" class="receipt-body" dir="rtl" style="font-family:'Cairo',sans-serif;padding:16px;margin:0 auto;font-size:13px;color:#222">
         </div>
     </div>
 </div>
@@ -556,11 +556,16 @@ document.addEventListener('keydown', (e) => {
     }
     #receipt-modal > div {
         box-shadow: none !important; border: none !important; border-radius: 0 !important;
-        max-width: 80mm !important; width: 80mm !important; margin: 0 auto !important;
+        max-width: <?= ($store['print_type'] ?? 'thermal') === 'a4' ? '210mm' : '80mm' ?> !important; 
+        width: <?= ($store['print_type'] ?? 'thermal') === 'a4' ? '210mm' : '80mm' ?> !important; 
+        margin: 0 auto !important;
     }
     .print-hide { display: none !important; }
-    .receipt-body { padding: 4mm !important; }
-    @page { size: 80mm auto; margin: 2mm; }
+    .receipt-body { padding: <?= ($store['print_type'] ?? 'thermal') === 'a4' ? '0' : '4mm' ?> !important; }
+    @page { 
+        size: <?= ($store['print_type'] ?? 'thermal') === 'a4' ? 'A4' : '80mm auto' ?>; 
+        margin: <?= ($store['print_type'] ?? 'thermal') === 'a4' ? '0' : '2mm' ?>; 
+    }
 }
 </style>
 

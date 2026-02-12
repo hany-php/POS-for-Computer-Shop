@@ -784,72 +784,157 @@ function printReceipt(orderNumber = null, orderDate = null) {
         </tr>`;
     }).join('');
     
-    const html = `
-    <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#000;padding:10px;font-size:12px;width:100%;max-width:80mm;margin:0 auto">
-        <div style="text-align:center;margin-bottom:15px">
-            <?php if (!empty($settings['store_logo_url'])): ?>
-            <img src="<?= sanitize($settings['store_logo_url']) ?>" style="max-height:60px;margin:0 auto 5px;display:block">
-            <?php else: ?>
-            <div style="width:40px;height:40px;background:#000;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 5px"><span class="material-icons-outlined" style="font-size:24px">computer</span></div>
-            <?php endif; ?>
-            <h2 style="margin:5px 0;font-size:16px;font-weight:800"><?= sanitize($settings['store_name']) ?></h2>
-            <?php if(!empty($settings['store_address'])): ?><p style="margin:2px 0;font-size:11px;color:#666"><?= sanitize($settings['store_address']) ?></p><?php endif; ?>
-            <?php if(!empty($settings['store_phone'])): ?><p style="margin:2px 0;font-size:11px;color:#666;direction:ltr"><?= sanitize($settings['store_phone']) ?></p><?php endif; ?>
+    const printType = '<?= $settings['print_type'] ?? 'thermal' ?>';
+    let html = '';
+
+    if (printType === 'a4') {
+        html = `
+        <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#000;padding:20px;font-size:14px;width:100%;max-width:210mm;margin:0 auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:30px;border-bottom:2px solid #333;padding-bottom:20px">
+                <div>
+                    <?php if (!empty($settings['store_logo_url'])): ?>
+                    <img src="<?= sanitize($settings['store_logo_url']) ?>" style="max-height:80px;display:block">
+                    <?php else: ?>
+                    <div style="width:50px;height:50px;background:#000;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:10px"><span class="material-icons-outlined" style="font-size:30px">computer</span></div>
+                    <?php endif; ?>
+                    <h1 style="margin:5px 0;font-size:24px;font-weight:800"><?= sanitize($settings['store_name']) ?></h1>
+                </div>
+                <div style="text-align:left">
+                    <h2 style="font-size:28px;color:#999;margin:0">فاتورة مبيعات</h2>
+                    <p style="margin:5px 0;font-weight:bold">رقم: ${orderNumber ? '#' + orderNumber : '---'}</p>
+                    <p style="margin:5px 0;direction:ltr">${dateStr} ${timeStr}</p>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-cols: 1fr 1fr; gap: 40px; margin-bottom: 30px">
+                <div>
+                    <h3 style="border-bottom:1px solid #eee;padding-bottom:5px;margin-bottom:10px;font-size:16px">بيانات المتجر</h3>
+                    <?php if(!empty($settings['store_address'])): ?><p style="margin:3px 0;color:#555">${itemLabel = 'العنوان'}: <?= sanitize($settings['store_address']) ?></p><?php endif; ?>
+                    <?php if(!empty($settings['store_phone'])): ?><p style="margin:3px 0;color:#555;direction:ltr;text-align:right">${itemLabel = 'التليفون'}: <?= sanitize($settings['store_phone']) ?></p><?php endif; ?>
+                    <p style="margin:3px 0;color:#555">الكاشير: <?= sanitize($user['full_name']) ?></p>
+                </div>
+                <div style="text-align:left">
+                    <!-- Placeholder for client data if added later -->
+                </div>
+            </div>
+
+            <table style="width:100%;border-collapse:collapse;margin-bottom:30px">
+                <thead>
+                    <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+                        <th style="padding:12px 10px;text-align:right">الصنف</th>
+                        <th style="padding:12px 10px;text-align:center">الكمية</th>
+                        <th style="padding:12px 10px;text-align:center">السعر</th>
+                        <th style="padding:12px 10px;text-align:center">الخصم</th>
+                        <th style="padding:12px 10px;text-align:left">الإجمالي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${cart.map(item => `
+                    <tr style="border-bottom:1px solid #f1f5f9">
+                        <td style="padding:12px 10px;font-weight:bold">${item.name}</td>
+                        <td style="padding:12px 10px;text-align:center;font-family:'Cairo'">${item.qty}</td>
+                        <td style="padding:12px 10px;text-align:center;font-family:'Cairo'">${item.price.toLocaleString()}</td>
+                        <td style="padding:12px 10px;text-align:center;font-family:'Cairo';color:#c00">${item.discount > 0 ? '-' + item.discount.toLocaleString() : '0'}</td>
+                        <td style="padding:12px 10px;text-align:left;font-weight:bold;font-family:'Cairo'">${((item.price * item.qty) - item.discount).toLocaleString()}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+
+            <div style="display:flex;justify-content:flex-end">
+                <div style="width:300px">
+                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9">
+                        <span style="color:#64748b">المجموع الفرعي:</span>
+                        <span style="font-weight:bold">${subtotal.toLocaleString()} <?= CURRENCY ?></span>
+                    </div>
+                    ${totalDiscount > 0 ? `
+                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;color:#c00">
+                        <span>إجمالي الخصم:</span>
+                        <span>-${totalDiscount.toLocaleString()} <?= CURRENCY ?></span>
+                    </div>` : ''}
+                    <div style="display:flex;justify-content:space-between;padding:15px 0;margin-top:5px">
+                        <span style="font-size:20px;font-weight:800;color:primary">الإجمالي النهائي:</span>
+                        <span style="font-size:24px;font-weight:800;color:primary">${total.toLocaleString()} <?= CURRENCY ?></span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:60px;padding-top:20px;border-top:1px solid #eee;text-align:center">
+                <p style="font-size:14px;font-weight:bold;margin-bottom:10px"><?= sanitize($settings['receipt_footer']) ?></p>
+                <div style="display:flex;justify-content:center;gap:40px;margin-top:40px">
+                    <div style="border-top:1px solid #333;width:150px;padding-top:5px">توقيع المستلم</div>
+                    <div style="border-top:1px solid #333;width:150px;padding-top:5px">توقيع المتجر</div>
+                </div>
+            </div>
         </div>
-        
-        <div style="border-top:1px dashed #999;margin:10px 0"></div>
-        
-        <table style="width:100%;font-size:11px;margin-bottom:10px">
-            <tr><td style="color:#666">التاريخ:</td><td style="text-align:left;direction:ltr">${dateStr} ${timeStr}</td></tr>
-            <tr><td style="color:#666">الكاشير:</td><td style="text-align:left"><?= sanitize($user['full_name']) ?></td></tr>
-            <tr><td style="color:#666">رقم الفاتورة:</td><td style="text-align:left;direction:ltr;font-weight:bold">${orderNumber ? '#' + orderNumber : '---'}</td></tr>
-        </table>
-        
-        <div style="border-top:1px dashed #999;margin:10px 0"></div>
-        
-        <table style="width:100%;border-collapse:collapse;margin-bottom:15px">
-            <thead>
-                <tr style="border-bottom:1px solid #000">
-                    <th style="padding:5px 0;text-align:right">الصنف</th>
-                    <th style="padding:5px 0;text-align:left">الإجمالي</th>
+        `;
+    } else {
+        html = `
+        <div style="font-family:'Cairo',sans-serif;direction:rtl;color:#000;padding:10px;font-size:12px;width:100%;max-width:80mm;margin:0 auto">
+            <div style="text-align:center;margin-bottom:15px">
+                <?php if (!empty($settings['store_logo_url'])): ?>
+                <img src="<?= sanitize($settings['store_logo_url']) ?>" style="max-height:60px;margin:0 auto 5px;display:block">
+                <?php else: ?>
+                <div style="width:40px;height:40px;background:#000;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 5px"><span class="material-icons-outlined" style="font-size:24px">computer</span></div>
+                <?php endif; ?>
+                <h2 style="margin:5px 0;font-size:16px;font-weight:800"><?= sanitize($settings['store_name']) ?></h2>
+                <?php if(!empty($settings['store_address'])): ?><p style="margin:2px 0;font-size:11px;color:#666"><?= sanitize($settings['store_address']) ?></p><?php endif; ?>
+                <?php if(!empty($settings['store_phone'])): ?><p style="margin:2px 0;font-size:11px;color:#666;direction:ltr"><?= sanitize($settings['store_phone']) ?></p><?php endif; ?>
+            </div>
+            
+            <div style="border-top:1px dashed #999;margin:10px 0"></div>
+            
+            <table style="width:100%;font-size:11px;margin-bottom:10px">
+                <tr><td style="color:#666">التاريخ:</td><td style="text-align:left;direction:ltr">${dateStr} ${timeStr}</td></tr>
+                <tr><td style="color:#666">الكاشير:</td><td style="text-align:left"><?= sanitize($user['full_name']) ?></td></tr>
+                <tr><td style="color:#666">رقم الفاتورة:</td><td style="text-align:left;direction:ltr;font-weight:bold">${orderNumber ? '#' + orderNumber : '---'}</td></tr>
+            </table>
+            
+            <div style="border-top:1px dashed #999;margin:10px 0"></div>
+            
+            <table style="width:100%;border-collapse:collapse;margin-bottom:15px">
+                <thead>
+                    <tr style="border-bottom:1px solid #000">
+                        <th style="padding:5px 0;text-align:right">الصنف</th>
+                        <th style="padding:5px 0;text-align:left">الإجمالي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemsHtml}
+                </tbody>
+            </table>
+            
+            <div style="border-top:1px solid #000;margin:10px 0"></div>
+            
+            <table style="width:100%;font-size:12px">
+                <tr>
+                    <td style="padding:3px 0">المجموع الفرعي</td>
+                    <td style="text-align:left;direction:ltr">${subtotal.toLocaleString()} <?= CURRENCY ?></td>
                 </tr>
-            </thead>
-            <tbody>
-                ${itemsHtml}
-            </tbody>
-        </table>
-        
-        <div style="border-top:1px solid #000;margin:10px 0"></div>
-        
-        <table style="width:100%;font-size:12px">
-            <tr>
-                <td style="padding:3px 0">المجموع الفرعي</td>
-                <td style="text-align:left;direction:ltr">${subtotal.toLocaleString()} <?= CURRENCY ?></td>
-            </tr>
-            ${totalDiscount > 0 ? `
-            <tr style="color:#c00">
-                <td style="padding:3px 0">إجمالي الخصم</td>
-                <td style="text-align:left;direction:ltr">-${totalDiscount.toLocaleString()} <?= CURRENCY ?></td>
-            </tr>` : ''}
-            <tr style="font-weight:bold;font-size:16px">
-                <td style="padding:8px 0">الإجمالي النهائي</td>
-                <td style="text-align:left;direction:ltr">${total.toLocaleString()} <?= CURRENCY ?></td>
-            </tr>
-        </table>
-        
-        <div style="border-top:1px dashed #999;margin:15px 0"></div>
-        
-        <p style="text-align:center;font-size:11px;color:#666"><?= sanitize($settings['receipt_footer']) ?></p>
-        <p style="text-align:center;font-size:10px;color:#aaa;margin-top:5px">يرجى الاحتفاظ بالإيصال للاستبدال</p>
-    </div>
-    `;
+                ${totalDiscount > 0 ? `
+                <tr style="color:#c00">
+                    <td style="padding:3px 0">إجمالي الخصم</td>
+                    <td style="text-align:left;direction:ltr">-${totalDiscount.toLocaleString()} <?= CURRENCY ?></td>
+                </tr>` : ''}
+                <tr style="font-weight:bold;font-size:16px">
+                    <td style="padding:8px 0">الإجمالي النهائي</td>
+                    <td style="text-align:left;direction:ltr">${total.toLocaleString()} <?= CURRENCY ?></td>
+                </tr>
+            </table>
+            
+            <div style="border-top:1px dashed #999;margin:15px 0"></div>
+            
+            <p style="text-align:center;font-size:11px;color:#666"><?= sanitize($settings['receipt_footer']) ?></p>
+            <p style="text-align:center;font-size:10px;color:#aaa;margin-top:5px">يرجى الاحتفاظ بالإيصال للاستبدال</p>
+        </div>
+        `;
+    }
     
     const printData = { html: html };
     localStorage.setItem('pos_print_data', JSON.stringify(printData));
     
     // Open print window
-    const width = 450;
-    const height = 600;
+    const width = printType === 'a4' ? 900 : 450;
+    const height = printType === 'a4' ? 1000 : 600;
     const left = (screen.width - width) / 2;
     const top = (screen.height - height) / 2;
     

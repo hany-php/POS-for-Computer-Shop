@@ -122,6 +122,7 @@ function getStoreSettings() {
         'currency' => $s['currency'] ?? CURRENCY,
         'tax_rate' => $s['tax_rate'] ?? (TAX_RATE * 100),
         'receipt_footer' => $s['receipt_footer'] ?? 'شكراً لتعاملكم معنا',
+        'print_type' => $s['print_type'] ?? 'thermal',
     ];
 }
 

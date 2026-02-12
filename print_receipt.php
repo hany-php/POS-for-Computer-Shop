@@ -14,11 +14,28 @@ $user = Auth::user();
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         body { margin: 0; padding: 0; font-family: 'Cairo', sans-serif; background: #fff; }
-        #receipt { width: 80mm; margin: 0 auto; padding: 5mm; background: #fff; }
+        #receipt { 
+            width: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? '210mm' : '80mm' ?>; 
+            margin: 0 auto; 
+            padding: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? '20mm' : '5mm' ?>; 
+            background: #fff; 
+            min-height: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? '297mm' : 'auto' ?>;
+            box-sizing: border-box;
+        }
         @media print {
             body { background: #fff; }
-            #receipt { width: 100%; padding: 0; }
+            #receipt { 
+                width: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? '210mm' : '100%' ?>; 
+                padding: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? '15mm' : '0' ?>; 
+                margin: 0 auto; 
+                border: none;
+                box-sizing: border-box;
+            }
             .no-print { display: none; }
+            @page {
+                size: <?= ($settings['print_type'] ?? 'thermal') === 'a4' ? 'A4' : '80mm auto' ?>;
+                margin: 0;
+            }
         }
         .btn {
             background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-family: inherit; font-weight: bold;
@@ -42,13 +59,15 @@ $user = Auth::user();
                 
                 // Auto resize window to fit content
                 setTimeout(() => {
+                    const printType = '<?= $settings['print_type'] ?? 'thermal' ?>';
                     const contentHeight = document.body.scrollHeight;
-                    // Add some buffer for window chrome (title bar etc)
                     const chromeHeight = window.outerHeight - window.innerHeight;
+                    const width = printType === 'a4' ? 900 : 450;
+                    
                     if (chromeHeight > 0) {
-                        window.resizeTo(450, contentHeight + chromeHeight + 50);
+                        window.resizeTo(width, contentHeight + chromeHeight + 50);
                     } else {
-                        window.resizeTo(450, contentHeight + 80);
+                        window.resizeTo(width, contentHeight + 80);
                     }
                 }, 100);
             } else {
