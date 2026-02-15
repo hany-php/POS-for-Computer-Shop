@@ -11,23 +11,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $auth = new Auth();
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     
     if (isset($_POST['login_type']) && $_POST['login_type'] === 'admin') {
+        $rateKey = 'login_admin:' . $ip;
+        $throttle = $auth->getLoginThrottleStatus($rateKey);
+        if (!$throttle['allowed']) {
+            $mins = ceil($throttle['seconds_remaining'] / 60);
+            $error = 'تم حظر تسجيل الدخول مؤقتًا بسبب كثرة المحاولات. حاول بعد ' . $mins . ' دقيقة.';
+        } else {
         $username = $_POST['username'] ?? '';
         $password = $_POST['password'] ?? '';
         if ($auth->loginWithPassword($username, $password)) {
+            $auth->clearLoginThrottle($rateKey);
             header('Location: pos.php');
             exit;
         } else {
+            $auth->registerLoginFailure($rateKey);
             $error = 'اسم المستخدم أو كلمة المرور غير صحيحة';
         }
+        }
     } else {
+        $rateKey = 'login_pin:' . $ip;
+        $throttle = $auth->getLoginThrottleStatus($rateKey);
+        if (!$throttle['allowed']) {
+            $mins = ceil($throttle['seconds_remaining'] / 60);
+            $error = 'تم حظر تسجيل الدخول مؤقتًا بسبب كثرة المحاولات. حاول بعد ' . $mins . ' دقيقة.';
+        } else {
         $pin = $_POST['pin'] ?? '';
         if ($auth->loginWithPin($pin)) {
+            $auth->clearLoginThrottle($rateKey);
             header('Location: pos.php');
             exit;
         } else {
+            $auth->registerLoginFailure($rateKey);
             $error = 'الرمز السري غير صحيح';
+        }
         }
     }
 }
@@ -42,6 +61,13 @@ if (Auth::isLoggedIn()) {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#137fec">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="<?= sanitize($settings['store_name']) ?>">
+    <link rel="manifest" href="manifest.php">
+    <link rel="apple-touch-icon" href="assets/pwa/apple-touch-icon.png">
     <title>تسجيل الدخول - <?= sanitize($settings['store_name']) ?></title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -299,6 +325,12 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') document.getElementById('pin-form').submit();
     }
 });
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    });
+}
 </script>
 </body>
 </html>

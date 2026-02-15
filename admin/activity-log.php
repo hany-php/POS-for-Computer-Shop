@@ -8,25 +8,42 @@ $user = Auth::user();
 $filterUser = $_GET['user'] ?? '';
 $filterAction = $_GET['action'] ?? '';
 $filterDate = $_GET['date'] ?? '';
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPage = 15;
 
-$sql = "SELECT * FROM audit_log WHERE 1=1";
+$whereSql = " FROM audit_log WHERE 1=1";
 $params = [];
 
 if ($filterUser) {
-    $sql .= " AND user_name LIKE ?";
+    $whereSql .= " AND user_name LIKE ?";
     $params[] = "%$filterUser%";
 }
 if ($filterAction) {
-    $sql .= " AND action LIKE ?";
+    $whereSql .= " AND action LIKE ?";
     $params[] = "%$filterAction%";
 }
 if ($filterDate) {
-    $sql .= " AND date(created_at) = ?";
+    $whereSql .= " AND date(created_at) = ?";
     $params[] = $filterDate;
 }
 
-$sql .= " ORDER BY created_at DESC LIMIT 200";
+$totalRows = intval(($db->fetchOne("SELECT COUNT(*) as cnt" . $whereSql, $params)['cnt'] ?? 0));
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
+$sql = "SELECT *" . $whereSql . " ORDER BY created_at DESC LIMIT $perPage OFFSET $offset";
 $logs = $db->fetchAll($sql, $params);
+
+$baseQuery = $_GET;
+unset($baseQuery['page']);
+function activityLogPageUrl($targetPage, $baseQuery) {
+    $q = $baseQuery;
+    $q['page'] = $targetPage;
+    return 'activity-log.php?' . http_build_query($q);
+}
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -51,6 +68,22 @@ include __DIR__ . '/../includes/header.php';
         </header>
 
         <div class="p-6">
+            <div class="mb-4 flex items-center justify-between text-sm">
+                <p class="text-slate-500">إجمالي السجلات: <span class="font-num font-bold"><?= $totalRows ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(activityLogPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(activityLogPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
+                </div>
+            </div>
             <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div class="overflow-auto max-h-[calc(100vh-200px)]">
                     <table class="w-full text-right">
@@ -87,6 +120,22 @@ include __DIR__ . '/../includes/header.php';
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center justify-between text-sm">
+                <p class="text-slate-500">إجمالي السجلات: <span class="font-num font-bold"><?= $totalRows ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(activityLogPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(activityLogPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

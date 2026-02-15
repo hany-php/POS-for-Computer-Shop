@@ -34,6 +34,19 @@ define('LOW_STOCK_THRESHOLD', 5);
 // Timezone
 date_default_timezone_set('Asia/Riyadh');
 
-// Error reporting
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+// Environment and error reporting
+$appEnv = getenv('APP_ENV') ?: 'development';
+define('APP_ENV', $appEnv);
+define('ERROR_LOG_PATH', __DIR__ . '/logs/app.log');
+if (!is_dir(__DIR__ . '/logs')) {
+    @mkdir(__DIR__ . '/logs', 0777, true);
+}
+ini_set('log_errors', '1');
+ini_set('error_log', ERROR_LOG_PATH);
+if (APP_ENV === 'production') {
+    error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED & ~E_STRICT);
+    ini_set('display_errors', '0');
+} else {
+    error_reporting(E_ALL);
+    ini_set('display_errors', '1');
+}

@@ -4,9 +4,8 @@ Auth::requireRole(['admin']);
 $pageTitle = 'التقارير';
 $user = Auth::user();
 
-// Date range
-$from = $_GET['from'] ?? date('Y-m-01');
-$to = $_GET['to'] ?? date('Y-m-d');
+// Date range with session persistence
+[$from, $to] = resolveDateRange('admin_reports', date('Y-m-01'), date('Y-m-d'));
 
 // Revenue, Cost, Profit
 $salesData = $db->fetchOne(
@@ -25,12 +24,14 @@ $revenue = $salesData['revenue'];
 $cost = $costData['total_cost'];
 $profit = $revenue - $cost;
 $ordersCount = $salesData['count'];
+$avgOrderValue = $ordersCount > 0 ? ($revenue / $ordersCount) : 0;
 
 // Refunded orders
 $refundedData = $db->fetchOne(
     "SELECT COUNT(*) as count, COALESCE(SUM(total),0) as total FROM orders WHERE status='refunded' AND date(created_at) BETWEEN ? AND ?",
     [$from, $to]
 );
+$refundRate = $ordersCount > 0 ? (intval($refundedData['count'] ?? 0) / $ordersCount) * 100 : 0;
 
 // Top selling products
 $topProducts = $db->fetchAll(
@@ -68,6 +69,14 @@ $dailyTrend = $db->fetchAll(
 $lowStock = $db->fetchAll(
     "SELECT name, quantity FROM products WHERE is_active=1 AND quantity <= 5 ORDER BY quantity ASC LIMIT 10"
 );
+$deliveredMaintenance = $db->fetchOne(
+    "SELECT COUNT(*) AS cnt, AVG((julianday(updated_at) - julianday(created_at))) AS avg_days
+     FROM maintenance_tickets
+     WHERE status = 'delivered' AND date(updated_at) BETWEEN ? AND ?",
+    [$from, $to]
+);
+$deliveredMaintenanceCount = intval($deliveredMaintenance['cnt'] ?? 0);
+$avgMaintenanceDays = floatval($deliveredMaintenance['avg_days'] ?? 0);
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -99,7 +108,7 @@ include __DIR__ . '/../includes/header.php';
 
         <div class="p-6 space-y-6">
             <!-- Summary Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 <div class="bg-white rounded-xl border border-slate-200 p-5">
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xs font-medium text-slate-500">الإيرادات</span>
@@ -132,6 +141,22 @@ include __DIR__ . '/../includes/header.php';
                     </div>
                     <p class="text-2xl font-bold text-slate-900 font-num"><?= number_format($refundedData['total'], 2) ?></p>
                     <p class="text-xs text-slate-400 mt-1"><?= $refundedData['count'] ?> مرتجع</p>
+                </div>
+                <div class="bg-white rounded-xl border border-slate-200 p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-slate-500">متوسط الفاتورة</span>
+                        <span class="material-icons-outlined text-sky-500 text-xl">receipt_long</span>
+                    </div>
+                    <p class="text-2xl font-bold text-slate-900 font-num"><?= number_format($avgOrderValue, 2) ?></p>
+                    <p class="text-xs text-slate-400 mt-1">نسبة مرتجع <?= number_format($refundRate, 1) ?>%</p>
+                </div>
+                <div class="bg-white rounded-xl border border-slate-200 p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-slate-500">صيانة منجزة</span>
+                        <span class="material-icons-outlined text-indigo-500 text-xl">engineering</span>
+                    </div>
+                    <p class="text-2xl font-bold text-slate-900 font-num"><?= $deliveredMaintenanceCount ?></p>
+                    <p class="text-xs text-slate-400 mt-1">متوسط الإنجاز <?= number_format($avgMaintenanceDays, 1) ?> يوم</p>
                 </div>
             </div>
 

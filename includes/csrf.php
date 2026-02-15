@@ -21,6 +21,16 @@ function verifyCsrfToken($token) {
     return hash_equals($_SESSION['csrf_token'], $token);
 }
 
+function requireCsrfTokenOrFail() {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $token = $_POST['csrf_token'] ?? '';
+        if (!verifyCsrfToken($token)) {
+            http_response_code(419);
+            die('خطأ في التحقق من صحة الطلب (CSRF)');
+        }
+    }
+}
+
 function csrfInput() {
     echo '<input type="hidden" name="csrf_token" value="' . generateCsrfToken() . '">';
 }

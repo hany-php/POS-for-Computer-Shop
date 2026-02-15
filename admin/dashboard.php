@@ -8,16 +8,35 @@ $includeChartJS = true;
 // Stats
 $todaySales = $db->fetchOne("SELECT COALESCE(SUM(total),0) as total, COUNT(*) as cnt FROM orders WHERE DATE(created_at) = DATE('now') AND status = 'completed'");
 $monthSales = $db->fetchOne("SELECT COALESCE(SUM(total),0) as total, COUNT(*) as cnt FROM orders WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') AND status = 'completed'");
+$todayDebt = $db->fetchOne(
+    "SELECT
+        COALESCE(SUM(CASE WHEN total > payment_received THEN (total - payment_received) ELSE 0 END),0) AS due_total,
+        COALESCE(SUM(CASE WHEN total > payment_received THEN (CASE WHEN payment_received > total THEN total ELSE payment_received END) ELSE total END),0) AS collected_total,
+        COUNT(CASE WHEN total > payment_received THEN 1 END) AS due_orders
+     FROM orders
+     WHERE DATE(created_at) = DATE('now') AND status = 'completed'"
+);
 $totalProducts = $db->fetchOne("SELECT COUNT(*) as cnt FROM products WHERE is_active = 1")['cnt'];
 $lowStock = $db->fetchOne("SELECT COUNT(*) as cnt FROM products WHERE is_active = 1 AND quantity <= " . LOW_STOCK_THRESHOLD)['cnt'];
 $activeMaintenance = $db->fetchOne("SELECT COUNT(*) as cnt FROM maintenance_tickets WHERE status NOT IN ('delivered','cancelled')")['cnt'];
+$customersDueTotal = floatval(($db->fetchOne("SELECT COALESCE(SUM(balance),0) AS total FROM customers WHERE is_active = 1")['total'] ?? 0));
 
 // Recent orders
-$recentOrders = $db->fetchAll("SELECT o.*, u.full_name as cashier_name FROM orders o LEFT JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT 10");
+$recentOrders = $db->fetchAll(
+    "SELECT
+        o.*,
+        u.full_name as cashier_name,
+        CASE WHEN o.status = 'completed' AND o.total > o.payment_received THEN 1 ELSE 0 END AS is_debt,
+        CASE WHEN o.total > o.payment_received THEN (o.total - o.payment_received) ELSE 0 END AS due_amount
+     FROM orders o
+     LEFT JOIN users u ON o.user_id = u.id
+     ORDER BY o.created_at DESC
+     LIMIT 10"
+);
 
 // Last 7 days sales chart data
 $last7Days = $db->fetchAll("SELECT DATE(created_at) as sale_date, SUM(total) as daily_total FROM orders WHERE created_at >= date('now','-7 days') AND status='completed' GROUP BY DATE(created_at) ORDER BY sale_date ASC");
-$chartLabels = array_map(fn($d) => date('m/d', strtotime($d['sale_date'])), $last7Days);
+$chartLabels = array_map(fn($d) => formatDateArShort($d['sale_date']), $last7Days);
 $chartData = array_map(fn($d) => round($d['daily_total'], 2), $last7Days);
 $totalLast7Days = array_sum($chartData);
 
@@ -47,14 +66,14 @@ include __DIR__ . '/../includes/header.php';
                     <p class="text-sm text-slate-500 mt-1">مرحباً <?= sanitize($user['full_name']) ?>! إليك ملخص أداء المتجر</p>
                 </div>
                 <div class="flex items-center gap-3">
-                    <span class="text-sm font-num text-slate-500 bg-slate-100 px-4 py-2 rounded-lg"><?= date('Y/m/d') ?></span>
+                    <span class="text-sm text-slate-500 bg-slate-100 px-4 py-2 rounded-lg"><?= sanitize(formatDateAr(date('Y-m-d'))) ?></span>
                 </div>
             </div>
         </header>
 
         <div class="p-6 space-y-6">
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-4">
                 <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div class="flex items-start justify-between mb-3">
                         <div class="p-2.5 bg-green-50 text-green-600 rounded-lg"><span class="material-icons-outlined">trending_up</span></div>
@@ -62,6 +81,21 @@ include __DIR__ . '/../includes/header.php';
                     <h3 class="text-xs font-medium text-slate-500 mb-1">مبيعات اليوم</h3>
                     <p class="text-2xl font-bold font-num text-slate-900"><?= number_format($todaySales['total']) ?> <span class="text-xs text-slate-400 font-normal"><?= CURRENCY_EN ?></span></p>
                     <p class="text-xs text-slate-400 font-num mt-1"><?= $todaySales['cnt'] ?> طلبات</p>
+                </div>
+                <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg"><span class="material-icons-outlined">account_balance_wallet</span></div>
+                    </div>
+                    <h3 class="text-xs font-medium text-slate-500 mb-1">المحصل اليوم</h3>
+                    <p class="text-2xl font-bold font-num text-emerald-700"><?= number_format(floatval($todayDebt['collected_total'] ?? 0), 2) ?> <span class="text-xs text-slate-400 font-normal"><?= CURRENCY_EN ?></span></p>
+                </div>
+                <div class="bg-white rounded-xl border border-amber-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="p-2.5 bg-amber-50 text-amber-600 rounded-lg"><span class="material-icons-outlined">credit_score</span></div>
+                    </div>
+                    <h3 class="text-xs font-medium text-slate-500 mb-1">دين مبيعات اليوم</h3>
+                    <p class="text-2xl font-bold font-num text-amber-700"><?= number_format(floatval($todayDebt['due_total'] ?? 0), 2) ?> <span class="text-xs text-slate-400 font-normal"><?= CURRENCY_EN ?></span></p>
+                    <p class="text-xs text-slate-400 font-num mt-1"><?= intval($todayDebt['due_orders'] ?? 0) ?> فواتير دين</p>
                 </div>
                 <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div class="flex items-start justify-between mb-3">
@@ -94,6 +128,13 @@ include __DIR__ . '/../includes/header.php';
                     </div>
                     <h3 class="text-xs font-medium text-slate-500 mb-1">صيانة نشطة</h3>
                     <p class="text-2xl font-bold font-num text-slate-900"><?= $activeMaintenance ?></p>
+                </div>
+                <div class="bg-white rounded-xl border border-red-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="p-2.5 bg-red-50 text-red-600 rounded-lg"><span class="material-icons-outlined">people</span></div>
+                    </div>
+                    <h3 class="text-xs font-medium text-slate-500 mb-1">إجمالي ديون العملاء</h3>
+                    <p class="text-2xl font-bold font-num text-red-700"><?= number_format($customersDueTotal, 2) ?> <span class="text-xs text-slate-400 font-normal"><?= CURRENCY_EN ?></span></p>
                 </div>
             </div>
 
@@ -158,7 +199,7 @@ include __DIR__ . '/../includes/header.php';
                                 <th class="p-4 text-xs font-semibold text-slate-500">رقم الطلب</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">التاريخ</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الكاشير</th>
-                                <th class="p-4 text-xs font-semibold text-slate-500">الدفع</th>
+                                <th class="p-4 text-xs font-semibold text-slate-500">الدفع / الدين</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الإجمالي</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الحالة</th>
                             </tr>
@@ -172,7 +213,18 @@ include __DIR__ . '/../includes/header.php';
                                 <td class="p-4 text-sm font-num font-medium"><?= $o['order_number'] ?></td>
                                 <td class="p-4 text-sm text-slate-500 font-num"><?= formatDateTimeAr($o['created_at']) ?></td>
                                 <td class="p-4 text-sm"><?= sanitize($o['cashier_name'] ?? '—') ?></td>
-                                <td class="p-4 text-sm"><?= getPaymentMethodAr($o['payment_method']) ?></td>
+                                <td class="p-4 text-sm">
+                                    <div class="flex flex-col gap-1">
+                                        <span><?= getPaymentMethodAr($o['payment_method']) ?></span>
+                                        <?php if (intval($o['is_debt'] ?? 0) === 1): ?>
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium w-fit">
+                                            دين: <span class="font-num"><?= number_format(floatval($o['due_amount'] ?? 0), 2) ?></span>
+                                        </span>
+                                        <?php else: ?>
+                                        <span class="text-xs text-emerald-600 font-medium">مسدد</span>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
                                 <td class="p-4 text-sm font-num font-bold"><?= number_format($o['total'], 2) ?> <?= CURRENCY ?></td>
                                 <td class="p-4">
                                     <?php if ($o['status'] === 'completed'): ?>

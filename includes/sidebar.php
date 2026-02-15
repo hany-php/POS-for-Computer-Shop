@@ -33,7 +33,14 @@ $userRole = $_SESSION['role'] ?? 'cashier';
             <div class="space-y-1">
                 <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'reports' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="reports.php"><span class="material-icons-outlined text-xl">analytics</span>التقارير</a>
                 <a class="flex items-center gap-3 pr-10 py-1.5 text-xs <?= $currentPage === 'advanced-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-slate-600' ?> rounded-lg" href="advanced-reports.php">التقارير المتقدمة</a>
+                <a class="flex items-center gap-3 pr-10 py-1.5 text-xs <?= $currentPage === 'finance-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-slate-600' ?> rounded-lg" href="finance-reports.php">التقارير المالية</a>
             </div>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'accounting' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="accounting.php"><span class="material-icons-outlined text-xl">account_balance</span>المحاسبة والمالية</a>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'financial-center' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="financial-center.php"><span class="material-icons-outlined text-xl">monitoring</span>المركز المالي</a>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'treasury' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="treasury.php"><span class="material-icons-outlined text-xl">account_balance_wallet</span>إدارة الخزنة</a>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'expenses' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="expenses.php"><span class="material-icons-outlined text-xl">payments</span>إدارة المصروفات</a>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'suppliers' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="suppliers.php"><span class="material-icons-outlined text-xl">local_shipping</span>إدارة الموردين</a>
+            <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'purchases' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="purchases.php"><span class="material-icons-outlined text-xl">shopping_cart_checkout</span>إدارة المشتريات</a>
             <a class="flex items-center gap-3 px-4 py-2.5 text-sm <?= $currentPage === 'customers' ? 'bg-primary/10 text-primary' : 'text-slate-500' ?> rounded-lg" href="customers.php"><span class="material-icons-outlined text-xl">people</span>العملاء</a>
             <?php endif; ?>
             <?php if (in_array($userRole, ['admin', 'technician'])): ?>
@@ -99,12 +106,39 @@ $userRole = $_SESSION['role'] ?? 'cashier';
                 <span class="material-icons-outlined group-hover:text-primary transition-colors">analytics</span>
                 <span class="font-medium">التقارير</span>
             </a>
-            <?php if (in_array($currentPage, ['reports', 'advanced-reports'])): ?>
+            <?php if (in_array($currentPage, ['reports', 'advanced-reports', 'finance-reports'])): ?>
             <a class="flex items-center gap-3 pr-12 py-2 text-sm <?= $currentPage === 'advanced-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-primary' ?> transition-colors" href="advanced-reports.php">
                 <span class="text-xs">← التقارير المتقدمة</span>
             </a>
+            <a class="flex items-center gap-3 pr-12 py-2 text-sm <?= $currentPage === 'finance-reports' ? 'text-primary font-bold' : 'text-slate-400 hover:text-primary' ?> transition-colors" href="finance-reports.php">
+                <span class="text-xs">← التقارير المالية</span>
+            </a>
             <?php endif; ?>
         </div>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'accounting' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="accounting.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">account_balance</span>
+            <span class="font-medium">المحاسبة والمالية</span>
+        </a>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'financial-center' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="financial-center.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">monitoring</span>
+            <span class="font-medium">المركز المالي</span>
+        </a>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'treasury' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="treasury.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">account_balance_wallet</span>
+            <span class="font-medium">إدارة الخزنة</span>
+        </a>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'expenses' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="expenses.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">payments</span>
+            <span class="font-medium">إدارة المصروفات</span>
+        </a>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'suppliers' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="suppliers.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">local_shipping</span>
+            <span class="font-medium">إدارة الموردين</span>
+        </a>
+        <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'purchases' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="purchases.php">
+            <span class="material-icons-outlined group-hover:text-primary transition-colors">shopping_cart_checkout</span>
+            <span class="font-medium">إدارة المشتريات</span>
+        </a>
         <a class="flex items-center gap-3 px-4 py-3 <?= $currentPage === 'customers' ? 'bg-primary/10 text-primary' : 'text-slate-500 hover:bg-slate-50' ?> rounded-lg transition-colors group" href="customers.php">
             <span class="material-icons-outlined group-hover:text-primary transition-colors">people</span>
             <span class="font-medium">العملاء</span>

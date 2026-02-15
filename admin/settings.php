@@ -6,7 +6,8 @@ $user = Auth::user();
 
 // Handle save
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $fields = ['store_name', 'store_address', 'store_phone', 'store_email', 'store_logo_url', 'tax_rate', 'currency', 'low_stock_threshold', 'receipt_footer', 'print_type'];
+    requireCsrfTokenOrFail();
+    $fields = ['store_name', 'store_address', 'store_phone', 'store_email', 'store_logo_url', 'tax_rate', 'tax_enabled', 'hijri_date_enabled', 'currency', 'low_stock_threshold', 'receipt_footer', 'print_type'];
     foreach ($fields as $key) {
         if (isset($_POST[$key])) {
             $db->query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [$key, trim($_POST[$key])]);
@@ -40,6 +41,7 @@ include __DIR__ . '/../includes/header.php';
 
         <div class="p-6">
             <form method="POST" class="max-w-2xl space-y-6">
+                <?php csrfInput(); ?>
                 <!-- Store Info -->
                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div class="p-5 border-b border-slate-100 bg-slate-50">
@@ -90,8 +92,26 @@ include __DIR__ . '/../includes/header.php';
                                 <input type="text" name="currency" value="<?= sanitize($settings['currency'] ?? CURRENCY) ?>" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" placeholder="ج.م">
                             </div>
                             <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">تفعيل الضريبة</label>
+                                <select name="tax_enabled" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all">
+                                    <?php $taxEnabled = in_array(strtolower(trim((string)($settings['tax_enabled'] ?? '1'))), ['1','true','yes','on'], true); ?>
+                                    <option value="1" <?= $taxEnabled ? 'selected' : '' ?>>مفعلة</option>
+                                    <option value="0" <?= !$taxEnabled ? 'selected' : '' ?>>غير مفعلة</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1.5">نسبة الضريبة (%)</label>
-                                <input type="number" name="tax_rate" value="<?= sanitize($settings['tax_rate'] ?? (TAX_RATE * 100)) ?>" step="0.1" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-num focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-left" placeholder="0">
+                                <input type="number" name="tax_rate" value="<?= sanitize($settings['tax_rate'] ?? (normalizeTaxRate(TAX_RATE) * 100)) ?>" step="0.1" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-num focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-left" placeholder="0">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">عرض التاريخ الهجري</label>
+                                <select name="hijri_date_enabled" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all">
+                                    <?php $hijriEnabled = in_array(strtolower(trim((string)($settings['hijri_date_enabled'] ?? '1'))), ['1','true','yes','on'], true); ?>
+                                    <option value="1" <?= $hijriEnabled ? 'selected' : '' ?>>مفعل</option>
+                                    <option value="0" <?= !$hijriEnabled ? 'selected' : '' ?>>مخفي</option>
+                                </select>
                             </div>
                         </div>
                         <div>
@@ -145,5 +165,26 @@ include __DIR__ . '/../includes/header.php';
         </div>
     </main>
 </div>
+
+<script>
+const taxEnabledEl = document.querySelector('select[name="tax_enabled"]');
+const taxRateEl = document.querySelector('input[name="tax_rate"]');
+
+function syncTaxRateInputState() {
+    const enabled = taxEnabledEl && taxEnabledEl.value === '1';
+    if (!taxRateEl) return;
+    taxRateEl.disabled = !enabled;
+    if (!enabled) {
+        taxRateEl.classList.add('opacity-60', 'cursor-not-allowed');
+    } else {
+        taxRateEl.classList.remove('opacity-60', 'cursor-not-allowed');
+    }
+}
+
+if (taxEnabledEl) {
+    taxEnabledEl.addEventListener('change', syncTaxRateInputState);
+    syncTaxRateInputState();
+}
+</script>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>

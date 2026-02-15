@@ -3,9 +3,13 @@ require_once __DIR__ . '/includes/bootstrap.php';
 Auth::requireLogin();
 $pageTitle = 'شراء أجهزة مستعملة';
 $user = Auth::user();
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPage = 15;
+$searchQ = trim($_GET['q'] ?? '');
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    requireCsrfTokenOrFail();
     if ($_POST['action'] === 'purchase') {
         $transactionNumber = $db->generateTransactionNumber();
         $purchasePrice = floatval($_POST['purchase_price']);
@@ -32,8 +36,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-$purchases = $db->fetchAll("SELECT udp.*, u.full_name as employee_name FROM used_device_purchases udp LEFT JOIN users u ON udp.user_id = u.id ORDER BY udp.created_at DESC LIMIT 50");
+$whereSql = " FROM used_device_purchases udp LEFT JOIN users u ON udp.user_id = u.id WHERE 1=1";
+$params = [];
+if ($searchQ !== '') {
+    $whereSql .= " AND (
+        udp.transaction_number LIKE ?
+        OR udp.seller_name LIKE ?
+        OR udp.seller_phone LIKE ?
+        OR udp.serial_number LIKE ?
+        OR udp.device_brand LIKE ?
+        OR udp.device_model LIKE ?
+    )";
+    $like = '%' . $searchQ . '%';
+    $params = [$like, $like, $like, $like, $like, $like];
+}
+
+$totalPurchases = intval(($db->fetchOne("SELECT COUNT(*) as cnt" . $whereSql, $params)['cnt'] ?? 0));
+$totalPages = max(1, (int)ceil($totalPurchases / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
+$purchases = $db->fetchAll("SELECT udp.*, u.full_name as employee_name" . $whereSql . " ORDER BY udp.created_at DESC LIMIT $perPage OFFSET $offset", $params);
 $categories = $db->fetchAll("SELECT * FROM categories WHERE is_active = 1 ORDER BY sort_order");
+
+$baseQuery = $_GET;
+unset($baseQuery['page']);
+function buyUsedPageUrl($targetPage, $baseQuery) {
+    $q = $baseQuery;
+    $q['page'] = $targetPage;
+    return 'buy-used.php?' . http_build_query($q);
+}
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -71,6 +105,7 @@ include __DIR__ . '/includes/header.php';
             <div class="lg:col-span-4 xl:col-span-3 h-full flex flex-col gap-4 overflow-y-auto pr-1 pb-20 lg:pb-0">
                 <form method="POST">
                     <input type="hidden" name="action" value="purchase">
+                    <?php csrfInput(); ?>
                     
                     <!-- Seller Info -->
                     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-4">
@@ -206,10 +241,31 @@ include __DIR__ . '/includes/header.php';
             <!-- LEFT: Recent Transactions -->
             <div class="lg:col-span-8 xl:col-span-9 h-full flex flex-col gap-4">
                 <!-- Search -->
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <form method="GET" class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div class="relative w-full sm:max-w-md">
                         <span class="material-icons-outlined absolute right-3 top-2.5 text-slate-400">search</span>
-                        <input type="text" id="search-purchases" class="w-full bg-slate-50 border border-slate-200 rounded-lg pr-10 pl-4 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" placeholder="بحث برقم العملية، اسم البائع، أو السيريال...">
+                        <input type="text" id="search-purchases" name="q" value="<?= sanitize($searchQ) ?>" class="w-full bg-slate-50 border border-slate-200 rounded-lg pr-10 pl-4 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" placeholder="بحث برقم العملية، اسم البائع، أو السيريال...">
+                    </div>
+                    <div class="flex gap-2">
+                        <button type="submit" class="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors">بحث</button>
+                        <a href="buy-used.php" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm">إعادة ضبط</a>
+                    </div>
+                </form>
+
+                <div class="flex items-center justify-between text-sm">
+                    <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($purchases) ?></span> من أصل <span class="font-num font-bold"><?= $totalPurchases ?></span></p>
+                    <div class="flex items-center gap-2">
+                        <?php if ($page > 1): ?>
+                        <a href="<?= sanitize(buyUsedPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                        <?php endif; ?>
+                        <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                        <?php if ($page < $totalPages): ?>
+                        <a href="<?= sanitize(buyUsedPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -220,7 +276,7 @@ include __DIR__ . '/includes/header.php';
                             <span class="w-2 h-6 bg-primary rounded-full"></span>
                             العمليات الأخيرة
                         </h3>
-                        <span class="bg-primary/10 text-primary text-xs font-num font-bold px-2 py-1 rounded-full"><?= count($purchases) ?> عملية</span>
+                        <span class="bg-primary/10 text-primary text-xs font-num font-bold px-2 py-1 rounded-full"><?= $totalPurchases ?> عملية</span>
                     </div>
                     <div class="overflow-auto flex-grow">
                         <table class="w-full text-right">
@@ -271,6 +327,22 @@ include __DIR__ . '/includes/header.php';
                         </table>
                     </div>
                 </div>
+                <div class="flex items-center justify-between text-sm">
+                    <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($purchases) ?></span> من أصل <span class="font-num font-bold"><?= $totalPurchases ?></span></p>
+                    <div class="flex items-center gap-2">
+                        <?php if ($page > 1): ?>
+                        <a href="<?= sanitize(buyUsedPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                        <?php endif; ?>
+                        <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                        <?php if ($page < $totalPages): ?>
+                        <a href="<?= sanitize(buyUsedPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
 
                 <!-- Stats Cards -->
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -311,14 +383,5 @@ include __DIR__ . '/includes/header.php';
         </div>
     </main>
 </div>
-
-<script>
-document.getElementById('search-purchases')?.addEventListener('input', function() {
-    const q = this.value.toLowerCase();
-    document.querySelectorAll('.purchase-row').forEach(row => {
-        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
-});
-</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

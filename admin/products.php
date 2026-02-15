@@ -3,9 +3,141 @@ require_once __DIR__ . '/../includes/bootstrap.php';
 Auth::requireRole(['admin']);
 $pageTitle = 'إدارة المخزون';
 $user = Auth::user();
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPageAllowed = [15, 30, 50, 100];
+$perPage = intval($_GET['per_page'] ?? 15);
+if (!in_array($perPage, $perPageAllowed, true)) {
+    $perPage = 15;
+}
+$searchQ = trim($_GET['q'] ?? '');
+$categoryFilter = trim($_GET['category'] ?? '');
+$stockFilter = trim($_GET['stock'] ?? '');
 
 // Handle product actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    requireCsrfTokenOrFail();
+    if ($_POST['action'] === 'export_csv') {
+        $selectedIds = $_POST['selected_ids'] ?? [];
+        $rows = [];
+        if (is_array($selectedIds) && !empty($selectedIds)) {
+            $ids = array_values(array_filter(array_map('intval', $selectedIds), fn($v) => $v > 0));
+            if (!empty($ids)) {
+                $ph = implode(',', array_fill(0, count($ids), '?'));
+                $rows = $db->fetchAll(
+                    "SELECT p.name, p.description, COALESCE(c.name,'') AS category_name, p.price, p.cost_price, p.quantity, p.barcode, p.serial_number, p.image_url
+                     FROM products p
+                     LEFT JOIN categories c ON p.category_id = c.id
+                     WHERE p.is_active = 1 AND p.id IN ($ph)
+                     ORDER BY p.name",
+                    $ids
+                );
+            }
+        }
+        if (empty($rows)) {
+            $rows = $db->fetchAll(
+                "SELECT p.name, p.description, COALESCE(c.name,'') AS category_name, p.price, p.cost_price, p.quantity, p.barcode, p.serial_number, p.image_url
+                 FROM products p
+                 LEFT JOIN categories c ON p.category_id = c.id
+                 WHERE p.is_active = 1
+                 ORDER BY p.name"
+            );
+        }
+        $out = array_map(fn($r) => [
+            $r['name'],
+            $r['description'],
+            $r['category_name'],
+            $r['price'],
+            $r['cost_price'],
+            $r['quantity'],
+            $r['barcode'],
+            $r['serial_number'],
+            $r['image_url']
+        ], $rows);
+        outputCsvDownload(
+            'products_export_' . date('Ymd_His') . '.csv',
+            ['name', 'description', 'category_name', 'price', 'cost_price', 'quantity', 'barcode', 'serial_number', 'image_url'],
+            $out
+        );
+    }
+    if ($_POST['action'] === 'download_template') {
+        outputCsvDownload(
+            'products_template.csv',
+            ['name', 'description', 'category_name', 'price', 'cost_price', 'quantity', 'barcode', 'serial_number', 'image_url'],
+            [['منتج تجريبي', 'وصف مختصر', 'إكسسوارات', 100, 70, 5, '1234567890123', 'SN-001', '']]
+        );
+    }
+    if ($_POST['action'] === 'import_csv') {
+        try {
+            $rows = parseUploadedCsvAssoc($_FILES['csv_file'] ?? []);
+            $inserted = 0;
+            $updated = 0;
+            foreach ($rows as $r) {
+                $name = trim($r['name'] ?? $r['product_name'] ?? '');
+                if ($name === '') continue;
+                $description = trim($r['description'] ?? '');
+                $categoryName = trim($r['category_name'] ?? '');
+                $price = floatval($r['price'] ?? 0);
+                $costPrice = floatval($r['cost_price'] ?? 0);
+                $quantity = intval($r['quantity'] ?? 0);
+                $barcode = trim($r['barcode'] ?? '');
+                $serial = trim($r['serial_number'] ?? '');
+                $imageUrl = trim($r['image_url'] ?? '');
+
+                $categoryId = null;
+                if ($categoryName !== '') {
+                    $cat = $db->fetchOne("SELECT id FROM categories WHERE name = ? LIMIT 1", [$categoryName]);
+                    if (!$cat) {
+                        $categoryId = $db->insert("INSERT INTO categories (name, sort_order, is_active) VALUES (?, 0, 1)", [$categoryName]);
+                    } else {
+                        $categoryId = intval($cat['id']);
+                        $db->query("UPDATE categories SET is_active = 1 WHERE id = ?", [$categoryId]);
+                    }
+                }
+
+                $existing = null;
+                if ($barcode !== '') {
+                    $existing = $db->fetchOne("SELECT id, image_url FROM products WHERE barcode = ? LIMIT 1", [$barcode]);
+                }
+                if (!$existing) {
+                    $existing = $db->fetchOne("SELECT id, image_url FROM products WHERE name = ? LIMIT 1", [$name]);
+                }
+
+                if ($existing) {
+                    $db->query(
+                        "UPDATE products
+                         SET name = ?, description = ?, category_id = ?, price = ?, cost_price = ?, quantity = ?, barcode = ?, serial_number = ?, image_url = ?, is_active = 1, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?",
+                        [
+                            $name,
+                            $description,
+                            $categoryId,
+                            $price,
+                            $costPrice,
+                            $quantity,
+                            $barcode,
+                            $serial,
+                            $imageUrl !== '' ? $imageUrl : ($existing['image_url'] ?? ''),
+                            $existing['id']
+                        ]
+                    );
+                    $updated++;
+                } else {
+                    $db->insert(
+                        "INSERT INTO products (name, description, category_id, price, cost_price, quantity, barcode, serial_number, image_url, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                        [$name, $description, $categoryId, $price, $costPrice, $quantity, $barcode, $serial, $imageUrl]
+                    );
+                    $inserted++;
+                }
+            }
+            logActivity('استيراد منتجات CSV', 'product', null, "inserted:$inserted, updated:$updated");
+            setFlash('success', "تم استيراد المنتجات بنجاح (إضافة: $inserted ، تحديث: $updated)");
+        } catch (Exception $e) {
+            setFlash('error', 'فشل استيراد CSV: ' . $e->getMessage());
+        }
+        header('Location: products.php');
+        exit;
+    }
     if ($_POST['action'] === 'create') {
         $imageUrl = '';
         
@@ -86,14 +218,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-$products = $db->fetchAll("SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.is_active = 1 ORDER BY p.updated_at DESC");
+$whereSql = " FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.is_active = 1";
+$params = [];
+if ($searchQ !== '') {
+    $whereSql .= " AND (p.name LIKE ? OR p.barcode LIKE ? OR c.name LIKE ?)";
+    $like = '%' . $searchQ . '%';
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
+}
+if ($categoryFilter !== '') {
+    $whereSql .= " AND c.name = ?";
+    $params[] = $categoryFilter;
+}
+if ($stockFilter === 'low') {
+    $whereSql .= " AND p.quantity <= ? AND p.quantity > 0";
+    $params[] = LOW_STOCK_THRESHOLD;
+} elseif ($stockFilter === 'out') {
+    $whereSql .= " AND p.quantity <= 0";
+}
+
+$totalProducts = intval(($db->fetchOne("SELECT COUNT(*) as cnt" . $whereSql, $params)['cnt'] ?? 0));
+$totalPages = max(1, (int)ceil($totalProducts / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
+$products = $db->fetchAll("SELECT p.*, c.name as category_name" . $whereSql . " ORDER BY p.updated_at DESC LIMIT $perPage OFFSET $offset", $params);
 $categories = $db->fetchAll("SELECT * FROM categories WHERE is_active = 1 ORDER BY sort_order");
 
+$baseQuery = $_GET;
+unset($baseQuery['page']);
+function productsPageUrl($targetPage, $baseQuery) {
+    $q = $baseQuery;
+    $q['page'] = $targetPage;
+    return 'products.php?' . http_build_query($q);
+}
+
 // Stats
-$totalProducts = count($products);
-$totalValue = array_sum(array_map(fn($p) => $p['price'] * $p['quantity'], $products));
-$lowStockCount = count(array_filter($products, fn($p) => $p['quantity'] <= LOW_STOCK_THRESHOLD && $p['quantity'] > 0));
-$outOfStock = count(array_filter($products, fn($p) => $p['quantity'] <= 0));
+$totalValue = floatval(($db->fetchOne("SELECT COALESCE(SUM(price * quantity), 0) as total FROM products WHERE is_active = 1")['total'] ?? 0));
+$lowStockCount = intval(($db->fetchOne("SELECT COUNT(*) as cnt FROM products WHERE is_active = 1 AND quantity <= ? AND quantity > 0", [LOW_STOCK_THRESHOLD])['cnt'] ?? 0));
+$outOfStock = intval(($db->fetchOne("SELECT COUNT(*) as cnt FROM products WHERE is_active = 1 AND quantity <= 0")['cnt'] ?? 0));
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -109,34 +275,66 @@ include __DIR__ . '/../includes/header.php';
                     <h1 class="text-2xl font-bold text-slate-900">إدارة المخزون</h1>
                     <p class="text-sm text-slate-500 mt-1">إدارة المنتجات والأصناف والكميات</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center gap-2">
+                    <form method="POST" id="products-export-form" class="inline">
+                        <input type="hidden" name="action" value="export_csv">
+                        <?php csrfInput(); ?>
+                        <button type="submit" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-50">تصدير CSV</button>
+                    </form>
+                    <button type="button" onclick="submitSelectedProductsExport()" class="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100">تصدير المحدد</button>
+                    <form method="POST" class="inline">
+                        <input type="hidden" name="action" value="download_template">
+                        <?php csrfInput(); ?>
+                        <button type="submit" class="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-amber-100">تحميل قالب CSV</button>
+                    </form>
+                    <form method="POST" enctype="multipart/form-data" class="flex items-center gap-2">
+                        <input type="hidden" name="action" value="import_csv">
+                        <?php csrfInput(); ?>
+                        <input type="file" name="csv_file" accept=".csv,text/csv" required class="text-xs text-slate-500 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-slate-100 file:text-slate-700">
+                        <button type="submit" class="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-slate-900">استيراد CSV</button>
+                    </form>
                     <button onclick="document.getElementById('add-product-modal').classList.remove('hidden')" class="bg-primary hover:bg-primary-dark text-white px-5 py-2.5 rounded-xl shadow-lg shadow-primary/30 font-medium text-sm flex items-center gap-2 transition-all">
                         <span class="material-icons-outlined text-base">add</span>
                         إضافة منتج
                     </button>
+                    <form method="GET" class="flex items-center gap-2">
+                        <input type="hidden" name="q" value="<?= sanitize($searchQ) ?>">
+                        <input type="hidden" name="category" value="<?= sanitize($categoryFilter) ?>">
+                        <input type="hidden" name="stock" value="<?= sanitize($stockFilter) ?>">
+                        <label class="text-xs text-slate-500">عرض</label>
+                        <select name="per_page" onchange="this.form.submit()" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-sm font-num">
+                            <?php foreach ($perPageAllowed as $pp): ?>
+                            <option value="<?= $pp ?>" <?= $pp === $perPage ? 'selected' : '' ?>><?= $pp ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </form>
                 </div>
             </div>
         </header>
 
         <div class="p-6 space-y-6">
             <!-- Search + Filter -->
-            <div class="flex flex-col sm:flex-row gap-4">
+            <form method="GET" class="flex flex-col sm:flex-row gap-4">
+                <input type="hidden" name="per_page" value="<?= $perPage ?>">
                 <div class="relative flex-1 max-w-lg">
                     <span class="material-icons-outlined absolute right-3 top-2.5 text-slate-400">search</span>
-                    <input type="text" id="product-search" class="w-full bg-white border border-slate-200 rounded-xl pr-10 pl-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all shadow-sm" placeholder="بحث بالاسم، الباركود، أو الفئة...">
+                    <input type="text" name="q" id="product-search" value="<?= sanitize($searchQ) ?>" class="w-full bg-white border border-slate-200 rounded-xl pr-10 pl-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all shadow-sm" placeholder="بحث بالاسم، الباركود، أو الفئة...">
                 </div>
-                <select id="category-filter" class="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary shadow-sm">
-                    <option value="all">كل الفئات</option>
+                <select name="category" id="category-filter" class="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary shadow-sm">
+                    <option value="">كل الفئات</option>
                     <?php foreach ($categories as $cat): ?>
-                    <option value="<?= sanitize($cat['name']) ?>"><?= sanitize($cat['name']) ?></option>
+                    <?php $catName = $cat['name']; ?>
+                    <option value="<?= sanitize($catName) ?>" <?= $categoryFilter === $catName ? 'selected' : '' ?>><?= sanitize($catName) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <select id="stock-filter" class="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary shadow-sm">
-                    <option value="all">كل المخزون</option>
-                    <option value="low">منخفض المخزون</option>
-                    <option value="out">نفذ من المخزون</option>
+                <select name="stock" id="stock-filter" class="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary shadow-sm">
+                    <option value="" <?= $stockFilter === '' ? 'selected' : '' ?>>كل المخزون</option>
+                    <option value="low" <?= $stockFilter === 'low' ? 'selected' : '' ?>>منخفض المخزون</option>
+                    <option value="out" <?= $stockFilter === 'out' ? 'selected' : '' ?>>نفذ من المخزون</option>
                 </select>
-            </div>
+                <button type="submit" class="bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-primary-dark transition-colors">تصفية</button>
+                <a href="products.php" class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm">إعادة ضبط</a>
+            </form>
 
             <!-- Stats -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -158,12 +356,32 @@ include __DIR__ . '/../includes/header.php';
                 </div>
             </div>
 
+            <div class="flex items-center justify-between text-sm">
+                <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($products) ?></span> من أصل <span class="font-num font-bold"><?= $totalProducts ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(productsPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(productsPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
             <!-- Products Table -->
             <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div class="overflow-auto">
                     <table class="w-full text-right" id="products-table">
                         <thead class="bg-slate-50 sticky top-0 z-10">
                             <tr>
+                                <th class="p-4 text-xs font-semibold text-slate-500 w-12 text-center">
+                                    <input type="checkbox" id="products-select-all" class="rounded border-slate-300">
+                                </th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">المنتج</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الباركود</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الفئة</th>
@@ -175,12 +393,18 @@ include __DIR__ . '/../includes/header.php';
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
+                            <?php if (empty($products)): ?>
+                            <tr><td colspan="9" class="p-8 text-center text-slate-400">لا توجد منتجات</td></tr>
+                            <?php endif; ?>
                             <?php foreach ($products as $p): ?>
                             <tr class="product-row hover:bg-slate-50 transition-colors group" 
                                 data-name="<?= sanitize($p['name']) ?>" 
                                 data-category="<?= sanitize($p['category_name'] ?? '') ?>"
                                 data-barcode="<?= sanitize($p['barcode'] ?? '') ?>"
                                 data-qty="<?= $p['quantity'] ?>">
+                                <td class="p-4 text-center">
+                                    <input type="checkbox" class="product-row-check rounded border-slate-300" value="<?= intval($p['id']) ?>">
+                                </td>
                                 <td class="p-4">
                                     <div class="flex items-center gap-3">
                                         <div class="h-10 w-10 rounded-lg bg-slate-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
@@ -216,6 +440,7 @@ include __DIR__ . '/../includes/header.php';
                                         <form method="POST" onsubmit="return confirm('هل أنت متأكد من حذف هذا المنتج؟')">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="product_id" value="<?= $p['id'] ?>">
+                                            <?php csrfInput(); ?>
                                             <button type="submit" class="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-500 transition-colors"><span class="material-icons-outlined text-[18px]">delete</span></button>
                                         </form>
                                     </div>
@@ -224,6 +449,22 @@ include __DIR__ . '/../includes/header.php';
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+                <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($products) ?></span> من أصل <span class="font-num font-bold"><?= $totalProducts ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(productsPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(productsPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -240,6 +481,7 @@ include __DIR__ . '/../includes/header.php';
         <form id="product-form" method="POST" enctype="multipart/form-data" class="p-6 space-y-4">
             <input type="hidden" name="action" id="form-action" value="create">
             <input type="hidden" name="product_id" id="form-product-id" value="">
+            <?php csrfInput(); ?>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">اسم المنتج *</label>
                 <input type="text" name="name" id="f-name" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="اسم المنتج">
@@ -303,32 +545,6 @@ include __DIR__ . '/../includes/header.php';
 </div>
 
 <script>
-// Search & Filter
-function filterProducts() {
-    const q = document.getElementById('product-search').value.toLowerCase();
-    const cat = document.getElementById('category-filter').value;
-    const stock = document.getElementById('stock-filter').value;
-    
-    document.querySelectorAll('.product-row').forEach(row => {
-        const name = row.dataset.name.toLowerCase();
-        const category = row.dataset.category;
-        const barcode = row.dataset.barcode.toLowerCase();
-        const qty = parseInt(row.dataset.qty);
-        
-        let show = true;
-        if (q && !name.includes(q) && !barcode.includes(q)) show = false;
-        if (cat !== 'all' && category !== cat) show = false;
-        if (stock === 'low' && qty > <?= LOW_STOCK_THRESHOLD ?>) show = false;
-        if (stock === 'out' && qty > 0) show = false;
-        
-        row.style.display = show ? '' : 'none';
-    });
-}
-
-document.getElementById('product-search').addEventListener('input', filterProducts);
-document.getElementById('category-filter').addEventListener('change', filterProducts);
-document.getElementById('stock-filter').addEventListener('change', filterProducts);
-
 function editProduct(p) {
     document.getElementById('form-action').value = 'update';
     document.getElementById('form-product-id').value = p.id;
@@ -355,6 +571,28 @@ function closeProductModal() {
     document.getElementById('form-product-id').value = '';
     document.getElementById('modal-title').textContent = 'إضافة منتج جديد';
     document.getElementById('submit-text').textContent = 'إضافة المنتج';
+}
+
+document.getElementById('products-select-all')?.addEventListener('change', function() {
+    document.querySelectorAll('.product-row-check').forEach(ch => ch.checked = this.checked);
+});
+
+function submitSelectedProductsExport() {
+    const ids = Array.from(document.querySelectorAll('.product-row-check:checked')).map(ch => ch.value);
+    if (!ids.length) {
+        alert('اختر منتجًا واحدًا على الأقل للتصدير');
+        return;
+    }
+    const form = document.getElementById('products-export-form');
+    form.querySelectorAll('input[name=\"selected_ids[]\"]').forEach(el => el.remove());
+    ids.forEach(id => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'selected_ids[]';
+        inp.value = id;
+        form.appendChild(inp);
+    });
+    form.submit();
 }
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeProductModal(); });

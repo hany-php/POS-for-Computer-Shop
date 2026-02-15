@@ -3,22 +3,32 @@ require_once __DIR__ . '/includes/bootstrap.php';
 Auth::requireLogin();
 $pageTitle = 'الصيانة';
 $user = Auth::user();
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPage = 15;
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    requireCsrfTokenOrFail();
     if ($_POST['action'] === 'create') {
         $ticketNumber = $db->generateTicketNumber();
-        $db->insert(
+        $ticketId = $db->insert(
             "INSERT INTO maintenance_tickets (ticket_number, customer_name, customer_phone, device_type, device_brand, device_model, serial_number, problem_description, estimated_cost, technician_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [$ticketNumber, $_POST['customer_name'], $_POST['customer_phone'], $_POST['device_type'], $_POST['device_brand'] ?? '', $_POST['device_model'] ?? '', $_POST['serial_number'] ?? '', $_POST['problem_description'], floatval($_POST['estimated_cost'] ?? 0), $_POST['technician_id'] ?: null]
         );
+        $createNote = 'تم إنشاء التذكرة';
+        if (!empty($_POST['issue_template_id'])) {
+            $createNote .= ' باستخدام قالب عطل رقم #' . intval($_POST['issue_template_id']);
+        }
+        logMaintenanceHistory($ticketId, 'created', 'إنشاء تذكرة', $createNote);
         setFlash('success', 'تم إنشاء تذكرة الصيانة بنجاح: ' . $ticketNumber);
         header('Location: maintenance.php');
         exit;
     }
     if ($_POST['action'] === 'update_status') {
         $newStatus = $_POST['status'];
-        $ticketId = $_POST['ticket_id'];
+        $ticketId = intval($_POST['ticket_id'] ?? 0);
+        $ticketRow = $db->fetchOne("SELECT status FROM maintenance_tickets WHERE id = ?", [$ticketId]);
+        $oldStatus = $ticketRow['status'] ?? '';
         // If delivering, require actual_cost
         if ($newStatus === 'delivered' && isset($_POST['actual_cost'])) {
             $db->query("UPDATE maintenance_tickets SET status = ?, actual_cost = ?, discount = ?, notes = COALESCE(?, notes), updated_at = CURRENT_TIMESTAMP WHERE id = ?", 
@@ -26,23 +36,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             $db->query("UPDATE maintenance_tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [$newStatus, $ticketId]);
         }
+        if ($ticketId > 0) {
+            $statusNote = 'من ' . getMaintenanceStatusAr($oldStatus) . ' إلى ' . getMaintenanceStatusAr($newStatus);
+            if (!empty($_POST['delivery_notes'])) {
+                $statusNote .= ' - ' . trim((string)$_POST['delivery_notes']);
+            }
+            logMaintenanceHistory($ticketId, 'status_changed', 'تغيير حالة التذكرة', $statusNote);
+        }
         setFlash('success', 'تم تحديث الحالة بنجاح');
         header('Location: maintenance.php');
         exit;
     }
     if ($_POST['action'] === 'update_ticket') {
+        $ticketId = intval($_POST['ticket_id'] ?? 0);
         $db->query(
             "UPDATE maintenance_tickets SET estimated_cost = ?, actual_cost = ?, discount = ?, notes = ?, technician_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [floatval($_POST['estimated_cost']), floatval($_POST['actual_cost']), floatval($_POST['discount'] ?? 0), $_POST['notes'] ?? '', $_POST['technician_id'] ?: null, $_POST['ticket_id']]
+            [floatval($_POST['estimated_cost']), floatval($_POST['actual_cost']), floatval($_POST['discount'] ?? 0), $_POST['notes'] ?? '', $_POST['technician_id'] ?: null, $ticketId]
         );
+        logMaintenanceHistory($ticketId, 'ticket_updated', 'تعديل بيانات التذكرة', 'تم تحديث التكلفة/الفني/الملاحظات');
         setFlash('success', 'تم تحديث بيانات التذكرة بنجاح');
         header('Location: maintenance.php');
         exit;
     }
 }
 
-$tickets = $db->fetchAll("SELECT mt.*, u.full_name as technician_name FROM maintenance_tickets mt LEFT JOIN users u ON mt.technician_id = u.id ORDER BY mt.created_at DESC");
+$totalTickets = intval(($db->fetchOne("SELECT COUNT(*) as cnt FROM maintenance_tickets")['cnt'] ?? 0));
+$totalPages = max(1, (int)ceil($totalTickets / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+$tickets = $db->fetchAll("SELECT mt.*, u.full_name as technician_name FROM maintenance_tickets mt LEFT JOIN users u ON mt.technician_id = u.id ORDER BY mt.created_at DESC LIMIT $perPage OFFSET $offset");
 $technicians = $db->fetchAll("SELECT id, full_name FROM users WHERE role = 'technician' AND is_active = 1");
+$issueTemplates = $db->fetchAll(
+    "SELECT id, title, device_type, problem_text, default_estimated_cost
+     FROM maintenance_issue_templates
+     WHERE is_active = 1
+     ORDER BY sort_order ASC, id ASC"
+);
+$ticketIds = array_map(fn($row) => intval($row['id']), $tickets);
+$ticketHistoryMap = [];
+if (!empty($ticketIds)) {
+    $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+    $historyRows = $db->fetchAll(
+        "SELECT ticket_id, action_label, notes, changed_by_name, created_at
+         FROM maintenance_ticket_history
+         WHERE ticket_id IN ($placeholders)
+         ORDER BY created_at DESC",
+        $ticketIds
+    );
+    foreach ($historyRows as $hr) {
+        $tid = intval($hr['ticket_id']);
+        if (!isset($ticketHistoryMap[$tid])) {
+            $ticketHistoryMap[$tid] = [];
+        }
+        if (count($ticketHistoryMap[$tid]) < 7) {
+            $ticketHistoryMap[$tid][] = $hr;
+        }
+    }
+}
 $store = getStoreSettings();
 
 include __DIR__ . '/includes/header.php';
@@ -80,6 +132,7 @@ include __DIR__ . '/includes/header.php';
             <div class="lg:col-span-4 xl:col-span-3">
                 <form method="POST" class="space-y-4">
                     <input type="hidden" name="action" value="create">
+                    <?php csrfInput(); ?>
                     
                     <!-- Customer Info -->
                     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
@@ -144,14 +197,23 @@ include __DIR__ . '/includes/header.php';
                         </h2>
                         <div class="space-y-4">
                             <div>
+                                <label class="block text-xs font-medium text-slate-500 mb-1">قالب عطل متكرر</label>
+                                <select name="issue_template_id" id="issue-template" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" onchange="applyIssueTemplate(this.value)">
+                                    <option value="">بدون قالب</option>
+                                    <?php foreach ($issueTemplates as $tpl): ?>
+                                    <option value="<?= $tpl['id'] ?>"><?= sanitize($tpl['title']) ?><?= !empty($tpl['device_type']) ? ' - ' . sanitize($tpl['device_type']) : '' ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
                                 <label class="block text-xs font-medium text-slate-500 mb-1">وصف المشكلة</label>
-                                <textarea name="problem_description" required rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none" placeholder="صف المشكلة بالتفصيل..."></textarea>
+                                <textarea id="problem-description" name="problem_description" required rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none" placeholder="صف المشكلة بالتفصيل..."></textarea>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="block text-xs font-medium text-slate-500 mb-1">التكلفة المتوقعة</label>
                                     <div class="relative">
-                                        <input type="number" name="estimated_cost" step="0.01" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-left pl-14" placeholder="0.00">
+                                        <input type="number" id="estimated-cost" name="estimated_cost" step="0.01" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-num focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-left pl-14" placeholder="0.00">
                                         <span class="absolute left-3 top-2.5 text-slate-400 text-xs"><?= CURRENCY_EN ?></span>
                                     </div>
                                 </div>
@@ -185,6 +247,23 @@ include __DIR__ . '/includes/header.php';
                     <button onclick="filterTickets('delivered')" class="ticket-filter flex-shrink-0 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-all" data-status="delivered">تم التسليم</button>
                 </div>
 
+                <div class="mb-4 flex items-center justify-between text-sm">
+                    <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($tickets) ?></span></p>
+                    <div class="flex items-center gap-2">
+                        <?php if ($page > 1): ?>
+                        <a href="maintenance.php?page=<?= $page - 1 ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                        <?php endif; ?>
+                        <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                        <?php if ($page < $totalPages): ?>
+                        <a href="maintenance.php?page=<?= $page + 1 ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
                 <!-- Tickets Table -->
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -192,7 +271,7 @@ include __DIR__ . '/includes/header.php';
                             <span class="w-2 h-6 bg-primary rounded-full"></span>
                             تذاكر الصيانة
                         </h3>
-                        <span class="bg-primary/10 text-primary text-xs font-num font-bold px-2 py-1 rounded-full"><?= count($tickets) ?> تذكرة</span>
+                        <span class="bg-primary/10 text-primary text-xs font-num font-bold px-2 py-1 rounded-full"><?= $totalTickets ?> تذكرة</span>
                     </div>
                     <div class="overflow-auto">
                         <table class="w-full text-right">
@@ -249,6 +328,7 @@ include __DIR__ . '/includes/header.php';
                                             <form method="POST" class="inline">
                                                 <input type="hidden" name="action" value="update_status">
                                                 <input type="hidden" name="ticket_id" value="<?= $t['id'] ?>">
+                                                <?php csrfInput(); ?>
                                                 <select name="status" onchange="this.form.submit()" class="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-primary cursor-pointer">
                                                     <option value="">تغيير...</option>
                                                     <?php if ($t['status'] === 'pending_inspection'): ?>
@@ -266,6 +346,38 @@ include __DIR__ . '/includes/header.php';
                                             <button onclick='openReceipt(<?= json_encode($t, JSON_UNESCAPED_UNICODE) ?>)' class="p-1.5 hover:bg-purple-50 rounded-lg text-slate-400 hover:text-purple-600 transition-colors" title="طباعة فاتورة">
                                                 <span class="material-icons-outlined text-[18px]">print</span>
                                             </button>
+                                            <button onclick="toggleTimeline(<?= intval($t['id']) ?>)" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-colors" title="سجل الحالة">
+                                                <span class="material-icons-outlined text-[18px]">timeline</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr id="timeline-row-<?= intval($t['id']) ?>" class="ticket-row hidden bg-slate-50" data-status="<?= $t['status'] ?>">
+                                    <td colspan="9" class="p-4">
+                                        <div class="rounded-xl border border-slate-200 bg-white p-4">
+                                            <div class="flex items-center gap-2 mb-3 text-slate-700">
+                                                <span class="material-icons-outlined text-sm text-primary">history</span>
+                                                <span class="font-bold text-sm">Timeline التذكرة</span>
+                                            </div>
+                                            <?php $historyRows = $ticketHistoryMap[intval($t['id'])] ?? []; ?>
+                                            <?php if (empty($historyRows)): ?>
+                                                <p class="text-xs text-slate-400">لا يوجد سجل أحداث حتى الآن.</p>
+                                            <?php else: ?>
+                                                <div class="space-y-2">
+                                                    <?php foreach ($historyRows as $h): ?>
+                                                    <div class="flex items-start gap-3 text-xs">
+                                                        <span class="mt-1 inline-block w-2 h-2 rounded-full bg-primary"></span>
+                                                        <div class="flex-1">
+                                                            <p class="font-semibold text-slate-700"><?= sanitize($h['action_label']) ?></p>
+                                                            <?php if (!empty($h['notes'])): ?>
+                                                            <p class="text-slate-500 mt-0.5"><?= sanitize($h['notes']) ?></p>
+                                                            <?php endif; ?>
+                                                            <p class="text-slate-400 mt-0.5 font-num"><?= formatDateTimeAr($h['created_at']) ?> · <?= sanitize($h['changed_by_name'] ?? 'System') ?></p>
+                                                        </div>
+                                                    </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -274,12 +386,51 @@ include __DIR__ . '/includes/header.php';
                         </table>
                     </div>
                 </div>
+                <div class="mt-4 flex items-center justify-between text-sm">
+                    <p class="text-slate-500">المعروض في الصفحة: <span class="font-num font-bold"><?= count($tickets) ?></span></p>
+                    <div class="flex items-center gap-2">
+                        <?php if ($page > 1): ?>
+                        <a href="maintenance.php?page=<?= $page - 1 ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                        <?php endif; ?>
+                        <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                        <?php if ($page < $totalPages): ?>
+                        <a href="maintenance.php?page=<?= $page + 1 ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                        <?php else: ?>
+                        <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
 </div>
 
 <script>
+const ISSUE_TEMPLATES = <?= json_encode($issueTemplates, JSON_UNESCAPED_UNICODE) ?>;
+
+function applyIssueTemplate(templateId) {
+    const selected = ISSUE_TEMPLATES.find(t => String(t.id) === String(templateId));
+    if (!selected) return;
+
+    const problem = document.getElementById('problem-description');
+    const estimated = document.getElementById('estimated-cost');
+    const deviceType = document.querySelector('select[name="device_type"]');
+
+    if (problem && (!problem.value || problem.value.trim() === '')) {
+        problem.value = selected.problem_text || '';
+    } else if (problem && selected.problem_text) {
+        problem.value = selected.problem_text;
+    }
+    if (estimated && Number(selected.default_estimated_cost) > 0) {
+        estimated.value = selected.default_estimated_cost;
+    }
+    if (deviceType && selected.device_type) {
+        deviceType.value = selected.device_type;
+    }
+}
+
 function filterTickets(status) {
     document.querySelectorAll('.ticket-filter').forEach(btn => {
         if (btn.dataset.status === status) {
@@ -291,6 +442,12 @@ function filterTickets(status) {
     document.querySelectorAll('.ticket-row').forEach(row => {
         row.style.display = (status === 'all' || row.dataset.status === status) ? '' : 'none';
     });
+}
+
+function toggleTimeline(ticketId) {
+    const row = document.getElementById('timeline-row-' + ticketId);
+    if (!row) return;
+    row.classList.toggle('hidden');
 }
 
 // Edit Ticket Modal
@@ -412,6 +569,7 @@ document.addEventListener('keydown', (e) => {
         <form method="POST" class="p-6 space-y-4">
             <input type="hidden" name="action" value="update_ticket">
             <input type="hidden" name="ticket_id" id="edit-ticket-id">
+            <?php csrfInput(); ?>
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-medium text-slate-500 mb-1">التكلفة المتوقعة</label>
@@ -470,6 +628,7 @@ document.addEventListener('keydown', (e) => {
             <input type="hidden" name="action" value="update_status">
             <input type="hidden" name="status" value="delivered">
             <input type="hidden" name="ticket_id" id="deliver-ticket-id">
+            <?php csrfInput(); ?>
             
             <div class="bg-slate-50 rounded-lg p-4 text-sm space-y-2">
                 <div class="flex justify-between"><span class="text-slate-500">العميل</span><span class="font-medium" id="deliver-customer"></span></div>

@@ -5,6 +5,8 @@
  */
 $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 $user = Auth::user();
+$isAdminPage = strpos($_SERVER['PHP_SELF'] ?? '', '/admin/') !== false;
+$pwaBasePath = $isAdminPage ? '../' : '';
 if (!isset($settings)) {
     $settings = getStoreSettings();
 }
@@ -15,6 +17,13 @@ $appName = $settings['store_name'] ?? APP_NAME;
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#137fec">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="<?= sanitize($appName) ?>">
+    <link rel="manifest" href="<?= $pwaBasePath ?>manifest.php">
+    <link rel="apple-touch-icon" href="<?= $pwaBasePath ?>assets/pwa/apple-touch-icon.png">
     <title><?= $pageTitle ?? $appName ?> - <?= $appName ?></title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script>

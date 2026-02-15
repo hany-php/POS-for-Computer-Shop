@@ -6,8 +6,20 @@ $user = Auth::user();
 
 // Handle return
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    requireCsrfTokenOrFail();
     if ($_POST['action'] === 'return') {
         $orderId = intval($_POST['order_id']);
+        $order = $db->fetchOne("SELECT id, status FROM orders WHERE id = ?", [$orderId]);
+        if (!$order) {
+            setFlash('error', 'الطلب غير موجود');
+            header('Location: sales.php');
+            exit;
+        }
+        if ($order['status'] !== 'completed') {
+            setFlash('error', 'لا يمكن إرجاع فاتورة غير مكتملة أو مُرجعة مسبقاً');
+            header('Location: sales.php');
+            exit;
+        }
         
         // Ensure column exists (Migration check for safety)
         try {
@@ -27,7 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         foreach ($items as $item) {
             $db->query("UPDATE products SET quantity = quantity + ? WHERE id = ?", [$item['quantity'], $item['product_id']]);
         }
-        $db->query("UPDATE orders SET status = 'refunded', return_invoice_number = ? WHERE id = ?", [$returnNumber, $orderId]);
+        $updated = $db->query(
+            "UPDATE orders SET status = 'refunded', return_invoice_number = ? WHERE id = ? AND status = 'completed'",
+            [$returnNumber, $orderId]
+        )->rowCount();
+        if ($updated !== 1) {
+            setFlash('error', 'تعذر تنفيذ المرتجع، قد تكون الفاتورة تم إرجاعها بالفعل');
+            header('Location: sales.php');
+            exit;
+        }
         setFlash('success', 'تم عمل فاتورة مرتجع بنجاح. رقم المرتجع: ' . $returnNumber);
         header('Location: sales.php');
         exit;
@@ -37,7 +57,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // Fetch orders with optional date filter
 $dateFilter = $_GET['date'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
-$sql = "SELECT o.*, u.full_name as cashier_name, (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE 1=1";
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPage = 15;
+$sql = "SELECT
+            o.*,
+            u.full_name as cashier_name,
+            (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count,
+            CASE WHEN o.status='completed' AND o.total > o.payment_received THEN (o.total - o.payment_received) ELSE 0 END AS due_amount
+        FROM orders o
+        LEFT JOIN users u ON o.user_id = u.id
+        WHERE 1=1";
 $params = [];
 
 if ($dateFilter) {
@@ -48,9 +77,34 @@ if ($statusFilter) {
     $sql .= " AND o.status = ?";
     $params[] = $statusFilter;
 }
-$sql .= " ORDER BY o.created_at DESC LIMIT 100";
+
+$countSql = "SELECT COUNT(*) as cnt FROM orders o WHERE 1=1";
+$countParams = [];
+if ($dateFilter) {
+    $countSql .= " AND DATE(o.created_at) = ?";
+    $countParams[] = $dateFilter;
+}
+if ($statusFilter) {
+    $countSql .= " AND o.status = ?";
+    $countParams[] = $statusFilter;
+}
+$totalRows = intval(($db->fetchOne($countSql, $countParams)['cnt'] ?? 0));
+$totalPages = max(1, (int)ceil($totalRows / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+$sql .= " ORDER BY o.created_at DESC LIMIT $perPage OFFSET $offset";
 
 $orders = $db->fetchAll($sql, $params);
+
+$baseQuery = $_GET;
+unset($baseQuery['page']);
+function salesPageUrl($targetPage, $baseQuery) {
+    $q = $baseQuery;
+    $q['page'] = $targetPage;
+    return 'sales.php?' . http_build_query($q);
+}
 
 // Summary stats
 $sqlStats = "SELECT COALESCE(SUM(total),0) as total, COUNT(*) as cnt FROM orders WHERE status = 'completed'";
@@ -60,6 +114,18 @@ if ($dateFilter) {
     $statsParams[] = $dateFilter;
 }
 $stats = $db->fetchOne($sqlStats, $statsParams);
+$sqlDebtStats = "SELECT
+                    COALESCE(SUM(CASE WHEN total > payment_received THEN (total - payment_received) ELSE 0 END),0) AS due_total,
+                    COALESCE(SUM(CASE WHEN total > payment_received THEN (CASE WHEN payment_received > total THEN total ELSE payment_received END) ELSE total END),0) AS collected_total,
+                    COUNT(CASE WHEN total > payment_received THEN 1 END) AS due_cnt
+                 FROM orders
+                 WHERE status = 'completed'";
+$debtStatsParams = [];
+if ($dateFilter) {
+    $sqlDebtStats .= " AND DATE(created_at) = ?";
+    $debtStatsParams[] = $dateFilter;
+}
+$debtStats = $db->fetchOne($sqlDebtStats, $debtStatsParams);
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -102,6 +168,32 @@ include __DIR__ . '/../includes/header.php';
                         <p class="text-xs text-slate-500">عدد الطلبات</p>
                         <p class="text-lg font-bold font-num"><?= $stats['cnt'] ?></p>
                     </div>
+                    <div class="text-left border-r border-slate-200 pr-4">
+                        <p class="text-xs text-slate-500">إجمالي الدين</p>
+                        <p class="text-lg font-bold font-num text-amber-700"><?= number_format(floatval($debtStats['due_total'] ?? 0), 2) ?> <span class="text-xs text-slate-400"><?= CURRENCY_EN ?></span></p>
+                        <p class="text-[11px] text-slate-400 font-num"><?= intval($debtStats['due_cnt'] ?? 0) ?> فواتير دين</p>
+                    </div>
+                    <div class="text-left border-r border-slate-200 pr-4">
+                        <p class="text-xs text-slate-500">المحصل</p>
+                        <p class="text-lg font-bold font-num text-emerald-700"><?= number_format(floatval($debtStats['collected_total'] ?? 0), 2) ?> <span class="text-xs text-slate-400"><?= CURRENCY_EN ?></span></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between text-sm">
+                <p class="text-slate-500">إجمالي الفواتير: <span class="font-num font-bold"><?= $totalRows ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(salesPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(salesPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -116,6 +208,7 @@ include __DIR__ . '/../includes/header.php';
                                 <th class="p-4 text-xs font-semibold text-slate-500">الكاشير</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">العناصر</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الدفع</th>
+                                <th class="p-4 text-xs font-semibold text-slate-500">الدين</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">المجموع</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الضريبة</th>
                                 <th class="p-4 text-xs font-semibold text-slate-500">الإجمالي</th>
@@ -125,7 +218,7 @@ include __DIR__ . '/../includes/header.php';
                         </thead>
                         <tbody class="divide-y divide-slate-100">
                             <?php if (empty($orders)): ?>
-                            <tr><td colspan="10" class="p-8 text-center text-slate-400">لا توجد طلبات</td></tr>
+                            <tr><td colspan="11" class="p-8 text-center text-slate-400">لا توجد طلبات</td></tr>
                             <?php endif; ?>
                             <?php foreach ($orders as $o): ?>
                             <?php $isReturned = $o['status'] === 'refunded'; ?>
@@ -144,6 +237,16 @@ include __DIR__ . '/../includes/header.php';
                                         <span class="material-icons-outlined text-xs"><?= $o['payment_method'] === 'cash' ? 'payments' : ($o['payment_method'] === 'card' ? 'credit_card' : 'qr_code_scanner') ?></span>
                                         <?= getPaymentMethodAr($o['payment_method']) ?>
                                     </span>
+                                </td>
+                                <td class="p-4 text-sm font-num">
+                                    <?php $dueAmount = floatval($o['due_amount'] ?? 0); ?>
+                                    <?php if ($o['status'] === 'completed' && $dueAmount > 0): ?>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                        <?= number_format($dueAmount, 2) ?>
+                                    </span>
+                                    <?php else: ?>
+                                    <span class="text-emerald-600 text-xs font-medium">مسدد</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="p-4 text-sm font-num"><?= number_format($o['subtotal'], 2) ?></td>
                                 <td class="p-4 text-sm font-num text-slate-500"><?= number_format($o['tax_amount'], 2) ?></td>
@@ -166,6 +269,7 @@ include __DIR__ . '/../includes/header.php';
                                         <form method="POST" onsubmit="return confirm('هل أنت متأكد من عمل مرتجع لهذا الطلب؟ سيتم استرجاع المخزون.')">
                                             <input type="hidden" name="action" value="return">
                                             <input type="hidden" name="order_id" value="<?= $o['id'] ?>">
+                                            <?php csrfInput(); ?>
                                             <button type="submit" class="p-1.5 hover:bg-red-50 rounded-lg text-slate-500 hover:text-red-500 transition-colors" title="مرتجع">
                                                 <span class="material-icons-outlined text-[18px]">assignment_return</span>
                                             </button>
@@ -177,6 +281,22 @@ include __DIR__ . '/../includes/header.php';
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+                <p class="text-slate-500">إجمالي الفواتير: <span class="font-num font-bold"><?= $totalRows ?></span></p>
+                <div class="flex items-center gap-2">
+                    <?php if ($page > 1): ?>
+                    <a href="<?= sanitize(salesPageUrl($page - 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">السابق</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">السابق</span>
+                    <?php endif; ?>
+                    <span class="font-num text-slate-600">صفحة <?= $page ?> / <?= $totalPages ?></span>
+                    <?php if ($page < $totalPages): ?>
+                    <a href="<?= sanitize(salesPageUrl($page + 1, $baseQuery)) ?>" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">التالي</a>
+                    <?php else: ?>
+                    <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 text-slate-400">التالي</span>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -197,6 +317,31 @@ include __DIR__ . '/../includes/header.php';
 </div>
 
 <script>
+const SHOW_HIJRI_DATES = <?= isHijriDateEnabled() ? 'true' : 'false' ?>;
+
+function formatDateTimeArHijri(dateInput) {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return dateInput;
+    const g = d.toLocaleString('ar-EG', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    if (!SHOW_HIJRI_DATES) {
+        return g;
+    }
+    const h = d.toLocaleDateString('ar-SA-u-ca-islamic', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    }) + ' هـ';
+    return `${g} | ${h}`;
+}
+
 async function viewOrder(id) {
     document.getElementById('order-modal').classList.remove('hidden');
     try {
@@ -208,7 +353,7 @@ async function viewOrder(id) {
             let html = `
                 <div class="space-y-4">
                     <div class="flex justify-between text-sm"><span class="text-slate-500">رقم الفاتورة</span><span class="font-num font-bold text-primary">${o.order_number}</span></div>
-                    <div class="flex justify-between text-sm"><span class="text-slate-500">التاريخ</span><span class="font-num">${o.created_at}</span></div>
+                    <div class="flex justify-between text-sm"><span class="text-slate-500">التاريخ</span><span>${formatDateTimeArHijri(o.created_at)}</span></div>
                     <div class="flex justify-between text-sm"><span class="text-slate-500">طريقة الدفع</span><span>${o.payment_method}</span></div>
                     <div class="border-t border-dashed border-slate-200 pt-4">
                         <table class="w-full text-sm">

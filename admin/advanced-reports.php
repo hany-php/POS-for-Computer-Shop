@@ -5,9 +5,8 @@ Auth::requireRole(['admin']);
 $pageTitle = 'التقارير المتقدمة';
 $user = Auth::user();
 
-// Date range
-$from = $_GET['from'] ?? date('Y-m-01');
-$to = $_GET['to'] ?? date('Y-m-d');
+// Date range with session persistence
+[$from, $to] = resolveDateRange('admin_advanced_reports', date('Y-m-01'), date('Y-m-d'));
 
 // 1. Technician Performance
 $techPerformance = $db->fetchAll(
@@ -39,6 +38,26 @@ $usedDevicesSummary = $db->fetchOne(
     [$from . ' 00:00:00', $to . ' 23:59:59']
 );
 
+$inventoryTotalCost = floatval($inventoryValuation['total_cost'] ?? 0);
+$inventoryTotalPotential = floatval($inventoryValuation['total_potential_revenue'] ?? 0);
+$inventoryPotentialProfit = $inventoryTotalPotential - $inventoryTotalCost;
+$usedDevicesTotalPurchases = intval($usedDevicesSummary['total_purchases'] ?? 0);
+$usedDevicesTotalSpent = floatval($usedDevicesSummary['total_spent'] ?? 0);
+
+// Maintenance turnaround KPI
+$maintenanceKpi = $db->fetchOne(
+    "SELECT
+        COUNT(*) AS delivered_count,
+        AVG((julianday(updated_at) - julianday(created_at))) AS avg_days,
+        COALESCE(SUM(actual_cost - discount), 0) AS net_maintenance_revenue
+     FROM maintenance_tickets
+     WHERE status = 'delivered' AND date(updated_at) BETWEEN ? AND ?",
+    [$from, $to]
+);
+$deliveredCount = intval($maintenanceKpi['delivered_count'] ?? 0);
+$avgDays = floatval($maintenanceKpi['avg_days'] ?? 0);
+$maintenanceNetRevenue = floatval($maintenanceKpi['net_maintenance_revenue'] ?? 0);
+
 include __DIR__ . '/../includes/header.php';
 ?>
 
@@ -62,8 +81,26 @@ include __DIR__ . '/../includes/header.php';
         </header>
 
         <div class="p-6 space-y-6">
-            <!-- Inventory Valuation Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+                            <span class="material-icons-outlined">schedule</span>
+                        </div>
+                        <h3 class="font-bold text-slate-800 text-lg">سرعة إنجاز الصيانة</h3>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">التذاكر المسلمة</span>
+                            <span class="text-xl font-bold font-num"><?= $deliveredCount ?></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-500">متوسط مدة الإنجاز</span>
+                            <span class="text-xl font-bold font-num"><?= number_format($avgDays, 1) ?> يوم</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="p-3 bg-blue-50 text-blue-600 rounded-lg">
@@ -74,15 +111,15 @@ include __DIR__ . '/../includes/header.php';
                     <div class="space-y-4">
                         <div class="flex justify-between items-center">
                             <span class="text-slate-500">إجمالي التكلفة بالمخزن</span>
-                            <span class="text-xl font-bold font-num"><?= number_format($inventoryValuation['total_cost'], 2) ?> <?= CURRENCY ?></span>
+                            <span class="text-xl font-bold font-num"><?= number_format($inventoryTotalCost, 2) ?> <?= CURRENCY ?></span>
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-slate-500">القيمة البيعية المتوقعة</span>
-                            <span class="text-xl font-bold font-num"><?= number_format($inventoryValuation['total_potential_revenue'], 2) ?> <?= CURRENCY ?></span>
+                            <span class="text-xl font-bold font-num"><?= number_format($inventoryTotalPotential, 2) ?> <?= CURRENCY ?></span>
                         </div>
                         <div class="pt-4 border-t border-dashed border-slate-100 flex justify-between items-center">
                             <span class="text-emerald-600 font-bold">إجمالي الربح المحتمل</span>
-                            <span class="text-2xl font-bold text-emerald-600 font-num"><?= number_format($inventoryValuation['total_potential_revenue'] - $inventoryValuation['total_cost'], 2) ?> <?= CURRENCY ?></span>
+                            <span class="text-2xl font-bold text-emerald-600 font-num"><?= number_format($inventoryPotentialProfit, 2) ?> <?= CURRENCY ?></span>
                         </div>
                     </div>
                 </div>
@@ -97,14 +134,14 @@ include __DIR__ . '/../includes/header.php';
                     <div class="space-y-4">
                         <div class="flex justify-between items-center">
                             <span class="text-slate-500">عدد الأجهزة المشتراة</span>
-                            <span class="text-xl font-bold font-num"><?= $usedDevicesSummary['total_purchases'] ?> جهاز</span>
+                            <span class="text-xl font-bold font-num"><?= $usedDevicesTotalPurchases ?> جهاز</span>
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-slate-500">إجمالي المبالغ المدفوعة</span>
-                            <span class="text-xl font-bold font-num"><?= number_format($usedDevicesSummary['total_spent'], 2) ?> <?= CURRENCY ?></span>
+                            <span class="text-xl font-bold font-num"><?= number_format($usedDevicesTotalSpent, 2) ?> <?= CURRENCY ?></span>
                         </div>
                         <div class="pt-4 border-t border-dashed border-slate-100 flex items-center justify-center">
-                            <p class="text-xs text-slate-400">تساعدك هذه البيانات على تتبع السيولة المستخدمة في شراء المستعمل</p>
+                            <p class="text-xs text-slate-400">صافي إيراد الصيانة للفترة: <span class="font-num font-bold text-slate-700"><?= number_format($maintenanceNetRevenue, 2) ?> <?= CURRENCY ?></span></p>
                         </div>
                     </div>
                 </div>
@@ -142,7 +179,7 @@ include __DIR__ . '/../includes/header.php';
                                     </div>
                                     <span class="text-[10px] text-slate-400 font-num"><?= round($perc, 1) ?>%</span>
                                 </td>
-                                <td class="p-4 font-num font-bold text-slate-900"><?= number_format($tp['total_revenue'], 2) ?></td>
+                                <td class="p-4 font-num font-bold text-slate-900"><?= number_format(floatval($tp['total_revenue'] ?? 0), 2) ?></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

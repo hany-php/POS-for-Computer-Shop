@@ -6,12 +6,14 @@ $user = Auth::user();
 
 // Handle user actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    requireCsrfTokenOrFail();
     if ($_POST['action'] === 'create') {
         $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-        $pin = $_POST['pin'] ?? null;
+        $pinRaw = trim($_POST['pin'] ?? '');
+        $pinHash = $pinRaw !== '' ? password_hash($pinRaw, PASSWORD_DEFAULT) : null;
         $db->insert(
-            "INSERT INTO users (username, password, pin, full_name, role, is_active) VALUES (?, ?, ?, ?, ?, 1)",
-            [$_POST['username'], $password, $pin, $_POST['full_name'], $_POST['role']]
+            "INSERT INTO users (username, password, pin, pin_hash, full_name, role, is_active) VALUES (?, ?, NULL, ?, ?, ?, 1)",
+            [$_POST['username'], $password, $pinHash, $_POST['full_name'], $_POST['role']]
         );
         logActivity('إضافة مستخدم', 'user', null, $_POST['full_name'] . ' (' . $_POST['role'] . ')');
         setFlash('success', 'تم إضافة المستخدم بنجاح');
@@ -19,8 +21,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
     if ($_POST['action'] === 'update') {
-        $sql = "UPDATE users SET username=?, full_name=?, role=?, pin=? WHERE id=?";
-        $params = [$_POST['username'], $_POST['full_name'], $_POST['role'], $_POST['pin'] ?? null, $_POST['user_id']];
+        $pinRaw = trim($_POST['pin'] ?? '');
+        $pinHash = $pinRaw !== '' ? password_hash($pinRaw, PASSWORD_DEFAULT) : null;
+        $sql = "UPDATE users SET username=?, full_name=?, role=?, pin=NULL, pin_hash=? WHERE id=?";
+        $params = [$_POST['username'], $_POST['full_name'], $_POST['role'], $pinHash, $_POST['user_id']];
         $db->query($sql, $params);
         
         // Update password only if provided
@@ -98,7 +102,7 @@ include __DIR__ . '/../includes/header.php';
                                     ?>
                                     <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium border <?= $roleColors[$u['role']] ?? '' ?>"><?= Auth::getRoleNameAr($u['role']) ?></span>
                                 </td>
-                                <td class="p-4 text-sm font-num text-slate-400"><?= $u['pin'] ? '••••' : '—' ?></td>
+                                <td class="p-4 text-sm font-num text-slate-400"><?= (!empty($u['pin']) || !empty($u['pin_hash'])) ? '••••' : '—' ?></td>
                                 <td class="p-4">
                                     <?php if ($u['is_active']): ?>
                                     <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>نشط</span>
@@ -113,6 +117,7 @@ include __DIR__ . '/../includes/header.php';
                                         <form method="POST" class="inline-block" onsubmit="return confirm('<?= $u['is_active'] ? 'تعطيل' : 'تفعيل' ?> هذا المستخدم؟')">
                                             <input type="hidden" name="action" value="toggle">
                                             <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                            <?php csrfInput(); ?>
                                             <button type="submit" class="p-1.5 hover:bg-<?= $u['is_active'] ? 'red' : 'green' ?>-50 rounded-lg text-slate-500 hover:text-<?= $u['is_active'] ? 'red' : 'green' ?>-500 transition-colors" title="<?= $u['is_active'] ? 'تعطيل' : 'تفعيل' ?>">
                                                 <span class="material-icons-outlined text-[18px]"><?= $u['is_active'] ? 'block' : 'check_circle' ?></span>
                                             </button>
@@ -140,6 +145,7 @@ include __DIR__ . '/../includes/header.php';
         <form id="user-form" method="POST" class="p-6 space-y-4">
             <input type="hidden" name="action" id="form-action" value="create">
             <input type="hidden" name="user_id" id="form-user-id" value="">
+            <?php csrfInput(); ?>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">الاسم الكامل *</label>
                 <input type="text" name="full_name" id="f-name" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary">
